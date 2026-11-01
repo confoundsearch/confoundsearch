@@ -314,11 +314,20 @@ class TestServiceUrl:
         assert module.service_url() == "https://env.test"
         assert module.service_url("https://flag.test") == "https://flag.test"
 
-    def test_nothing_is_set_until_a_service_is_deployed(self, monkeypatch):
+    def test_the_built_in_address_is_the_projects_domain_over_https(self):
+        import re
+        from pathlib import Path
+
+        source = (Path(__file__).parent.parent / "confoundsearch" / "data" / "keyword_service.py").read_text()
+        shipped = re.search(r'^DEFAULT_SERVICE_URL = "([^"]*)"', source, re.M).group(1)
+        assert (
+            shipped == "https://confoundsearch.org"
+        )  # not the generated execute-api address, which can change
+
+    def test_an_empty_built_in_address_means_no_service(self, monkeypatch):
         from confoundsearch.data import keyword_service as module
 
         monkeypatch.delenv("CONFOUNDSEARCH_API", raising=False)
-        assert module.DEFAULT_SERVICE_URL == "" or module.DEFAULT_SERVICE_URL.startswith("https://")
         monkeypatch.setattr(module, "DEFAULT_SERVICE_URL", "")
         assert module.service_url() is None
 

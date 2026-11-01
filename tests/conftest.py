@@ -19,10 +19,55 @@ def hermetic_git(monkeypatch, git_identity):
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
 
 
+# Every setting the program reads from the environment (a developer's `.env` sets these, and `just` loads it).
+SETTINGS = (
+    "CONFOUNDSEARCH_API",
+    "CONFOUNDSEARCH_CACHE",
+    "ES_API_KEY",
+    "ES_URL",
+    "OPENAI_API_KEY",
+    "OPENAI_BASE_URL",
+    "OPENALEX_API_KEY",
+    "OPENALEX_EMAIL",
+    "OPENROUTER_API_KEY",
+    "PINECONE_API_KEY",
+    "S2_KEY",
+)
+
+
+@pytest.fixture(autouse=True)
+def clean_environment(request, monkeypatch):
+    """A test starts with none of the program's settings, whatever the developer's shell or `.env` holds.
+
+    Without this, a local `OPENAI_BASE_URL` or a real key changes what a test does (or spends money). The live
+    tests (`pytest -m live`) exist to use real keys, so they keep them.
+    """
+    if request.node.get_closest_marker("live"):
+        return
+    for name in SETTINGS:
+        monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def away_from_the_repo(monkeypatch, tmp_path_factory):
+    """Run every test from an empty folder, so a developer's real `.env` (keys!) is never read by a test."""
+    monkeypatch.chdir(tmp_path_factory.mktemp("cwd"))
+
+
 @pytest.fixture(autouse=True)
 def private_cache(monkeypatch, tmp_path_factory):
     """No test may read or fill the saved searches in the real home folder."""
     monkeypatch.setenv("CONFOUNDSEARCH_CACHE", str(tmp_path_factory.mktemp("cache")))
+
+
+@pytest.fixture(autouse=True)
+def no_built_in_service(monkeypatch):
+    """No test may depend on, or reach, the real service address built into the code. A test that wants
+    a built-in address sets one itself."""
+    from confoundsearch.data import keyword_service
+
+    monkeypatch.setattr(keyword_service, "DEFAULT_SERVICE_URL", "")
+    monkeypatch.delenv("CONFOUNDSEARCH_API", raising=False)
 
 
 IV = "IT investment"

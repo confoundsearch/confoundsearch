@@ -192,7 +192,7 @@ From then on `--corpus all` (the default) and `KeywordService()` use it with no 
 - **The address is public** once it is in the repository. That is the point, and why the key behind it is read-only,
   the API is throttled, and concurrency is capped.
 
-Until `DEFAULT_SERVICE_URL` is set it is empty, the service is simply not part of the default, and nothing changes.
+`DEFAULT_SERVICE_URL` is now set to `https://confoundsearch.org`. If it is ever emptied, the service simply drops out of the default and nothing else changes.
 
 ### Not done yet
 

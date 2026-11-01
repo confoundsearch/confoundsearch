@@ -23,9 +23,10 @@ from confoundsearch.http import Transport, urllib_transport
 from confoundsearch.logic.graph import Passage
 
 # The address of the ConfoundSearch service (devops/proxy), built into the code so that nothing has to be
-# configured. It is empty until the service is deployed: set it to the ApiUrl that the deploy prints, and
-# every install of this version searches through it. Searches made through the service go to that server.
-DEFAULT_SERVICE_URL = ""
+# configured. It is the domain the project owns, so it stays the same whatever is deployed behind it. Searches
+# made through it go to that server; `--api off` (or CONFOUNDSEARCH_API=off) switches it off, and `--api URL`
+# points at another deployment.
+DEFAULT_SERVICE_URL = "https://confoundsearch.org"
 OFF_WORDS = frozenset({"", "off", "none", "no", "false", "0"})  # any of these as a setting switches it off
 FETCH_LIMIT = 10  # ids per fetch request: the proxy refuses more
 SERVICE_MAX_K = 100  # most neighbours the proxy returns in one answer
@@ -36,8 +37,7 @@ READ_ONLY = "the keyword service is read-only: it cannot create, write or delete
 def service_url(setting: str | None = None) -> str | None:
     """The service address to use: the setting if there is one, else $CONFOUNDSEARCH_API, else the built-in.
 
-    `off` (or an empty setting) switches the service off: None. So does an empty built-in address, which is
-    how the code stands until a service is deployed.
+    `off` (or an empty setting) switches the service off: None. So does an empty built-in address.
     """
     chosen = setting if setting is not None else os.environ.get("CONFOUNDSEARCH_API")
     if chosen is None:
@@ -58,8 +58,8 @@ class HttpVectorStore:
         address = service_url(base_url)
         if address is None:
             raise VectorStoreError(
-                "no service address: pass one, set CONFOUNDSEARCH_API, or deploy the service and put its "
-                "address in DEFAULT_SERVICE_URL"
+                "no service address: pass one or set CONFOUNDSEARCH_API (the service may have been switched "
+                "off with `off`, or the built-in address removed)"
             )
         self.base_url = address.rstrip("/")
         self.timeout = timeout

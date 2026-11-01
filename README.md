@@ -45,6 +45,8 @@ longer jobs in a tmux/screen session or side terminal. See the technical appendi
 - **Semantic Scholar** (`S2_KEY`, free from semanticscholar.org/product/api): optional but worth the two minutes. Without a
   key you share a rate limit with every anonymous user, searches get refused (HTTP 429) and runs slow down or stop early.
 - **OpenAlex** (`OPENALEX_EMAIL` or `OPENALEX_API_KEY`): optional; an email puts you in OpenAlex's faster, more reliable pool.
+- **The ConfoundSearch service** (`confoundsearch.org`): on by default; it searches papers and the keyword vectors for you,
+  with no key of yours. Your search terms are sent to it. `--api off` (or `CONFOUNDSEARCH_API=off`) switches it off.
 
 A run usually costs less than $1 in model fees; the searches are free. Cap it with `--max-budget USD`: the run stops once the
 estimated model cost reaches that, and keeps what it found so far.

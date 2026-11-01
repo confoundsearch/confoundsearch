@@ -15,3 +15,7 @@ build/
 # output of devops/tools/keyword_vectors.py
 keyword_vectors/
 keyword_neighbors.md
+
+# what a run writes into the folder you ran it from (confoundsearch demo, the README's results/ folder)
+confoundsearch-demo.*
+results/
