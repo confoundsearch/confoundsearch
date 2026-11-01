@@ -1,0 +1,18 @@
+{
+  "mappings": {
+    "properties": {
+      "corpusid": {"type": "long"},
+      "title": {"type": "text"},
+      "abstract": {"type": "text"},
+      "url": {"type": "keyword", "index": false},
+      "year": {"type": "integer"},
+      "citationcount": {"type": "integer"},
+      "s2fieldsofstudy": {
+        "properties": {
+          "category": {"type": "keyword"},
+          "source": {"type": "keyword"}
+        }
+      }
+    }
+  }
+}

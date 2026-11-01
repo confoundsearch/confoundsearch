@@ -1,0 +1,10 @@
+# The source distribution carries the package, its description and its licence, not the repository around it.
+include README.pypi.md
+include LICENSE*
+prune tests
+prune assets
+prune examples
+prune devops
+prune evals
+prune .github
+global-exclude *.py[cod] __pycache__ .DS_Store .env .env.*

@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Runs lint and the full test suite before anything is pushed, so a failing change cannot leave your machine.
+# Installed by `just hooks` (which `just setup` runs). To push once without the checks: git push --no-verify
+set -euo pipefail
+
+# git feeds one line per ref being pushed: <local ref> <local sha> <remote ref> <remote sha>
+needs_checks=false
+while read -r local_ref local_sha _remote_ref _remote_sha; do
+  case "$local_ref" in refs/tags/*) continue ;; esac     # a tag is not new code
+  [[ "$local_sha" =~ ^0+$ ]] && continue                 # deleting a branch pushes no code
+  needs_checks=true
+done
+$needs_checks || exit 0
+
+cd "$(git rev-parse --show-toplevel)"
+if ! command -v just >/dev/null 2>&1; then
+  echo "pre-push: 'just' is not installed, so the checks cannot run." >&2
+  echo "          Install it (conda env create -f requirements.yml), or push anyway with: git push --no-verify" >&2
+  exit 1
+fi
+
+echo "pre-push: running lint and the full test suite before pushing (about two minutes)..." >&2
+if ! just check; then
+  echo "pre-push: the checks failed, so nothing was pushed. Fix them, or push anyway with: git push --no-verify" >&2
+  exit 1
+fi

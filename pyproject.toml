@@ -1,0 +1,74 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "confoundsearch"
+dynamic = ["version"]  # read from confoundsearch.__version__, the one place to bump it
+description = "ConfoundSearch: Find Unexpected Confounds in Organizational and Management Research"
+readme = { file = "README.pypi.md", content-type = "text/markdown" }  # the repository README has relative links
+requires-python = ">=3.8"
+license = "MIT"
+license-files = ["LICENSE*"]
+dependencies = []
+keywords = ["causal inference", "confounding", "markov decision process", "llm", "openai"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "Typing :: Typed",
+]
+
+[project.scripts]
+confoundsearch = "confoundsearch.interface.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-cov>=5", "hypothesis>=6", "ruff>=0.5", "mypy>=1.10", "pyyaml>=6", "rust-just>=1.17", "tomli>=2; python_version < '3.11'"]
+release = ["build>=1", "twine>=5", "tomli>=2; python_version < '3.11'"]
+
+[tool.setuptools.dynamic]
+version = { attr = "confoundsearch.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["confoundsearch*"]
+
+[tool.setuptools.package-data]
+"confoundsearch" = ["py.typed"]
+"confoundsearch.interface.skill" = ["SKILL.md", "UI_SKILL.md"]
+"confoundsearch.interface.ui" = ["app.html", "page.css", "page.js"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["live: calls a real service with your own key; skipped unless you run pytest -m live"]
+addopts = "-m 'not live' --cov=confoundsearch --cov-branch --cov-report=term-missing --cov-report=xml --cov-fail-under=100"
+
+[tool.coverage.run]
+# the release tests build throwaway fake projects in pytest temp folders; they are fixtures, not product code
+omit = ["*/pytest-of-*/*"]
+
+[tool.coverage.report]
+exclude_also = ["if TYPE_CHECKING:", "\\.\\.\\."]
+
+[tool.ruff]
+line-length = 110
+target-version = "py38"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "C4", "RUF"]
+ignore = ["RUF100"]
+
+[tool.ruff.lint.per-file-ignores]
+"evals/**" = ["E741", "SIM115"]  # the raters' analysis scripts are kept as they were written
+
+[tool.mypy]
+strict = true
+python_version = "3.10"  # the oldest current mypy can check; the tests run on 3.8 and 3.9 for real

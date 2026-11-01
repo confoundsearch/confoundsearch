@@ -1,0 +1,38 @@
+# Everything needed to work on ConfoundSearch, as a conda environment.
+#
+#   conda env create -f requirements.yml        # once, from the repository root
+#   conda activate confoundsearch
+#   just check                                  # lint, type-check and the full test suite
+#
+# To bring an existing environment up to date after this file changes:
+#   conda env update -f requirements.yml --prune        (or: just env)
+#
+# Runtime: the package has NO dependencies of its own, only Python (3.8 or newer). Using it needs just
+# `pip install confoundsearch`. This file is for developing, testing and releasing it. The tool versions
+# below mirror the `dev` and `release` extras in pyproject.toml (PyPI's `rust-just` is `just` here); tests/test_requirements.py fails if they drift.
+# Package names were checked against conda-forge; note that PyPI's `build` is `python-build` there.
+
+name: confoundsearch
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12             # the package supports 3.8-3.13 (CI tests all six); change this line to try another
+  - pip
+
+  # development and testing  (the `dev` extra)
+  - pytest>=8
+  - pytest-cov>=5
+  - hypothesis>=6
+  - ruff>=0.5
+  - mypy>=1.10
+  - pyyaml>=6
+
+  # releasing  (the `release` extra)
+  - python-build>=1
+  - twine>=5
+
+  - just>=1.17              # the task runner (justfile); installed from PyPI as `rust-just` in the dev extra
+
+  # the package itself, editable, from this folder
+  - pip:
+      - -e .

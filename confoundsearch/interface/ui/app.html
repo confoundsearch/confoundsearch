@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ConfoundSearch</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root { --bg:#f4f6f8; --panel:#fff; --line:#d9dee5; --ink:#1f2933; --mute:#677484; --accent:#2563eb; --ok:#16a34a; --bad:#dc2626; }
+* { box-sizing: border-box; }
+body { margin:0; font:14px/1.45 "IBM Plex Sans", -apple-system, "Segoe UI", sans-serif; background:var(--bg); color:var(--ink); }
+header { padding:14px 24px; background:var(--panel); border-bottom:1px solid var(--line); display:flex; align-items:baseline; gap:12px; }
+header h1 { margin:0; font-size:17px; font-weight:600; }
+header span { color:var(--mute); }
+main { max-width:1100px; margin:0 auto; padding:20px 24px 48px; }
+form { display:grid; grid-template-columns:1fr 1fr 110px 110px auto; gap:12px; align-items:end; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:16px; }
+label { display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--mute); }
+input { font:inherit; color:var(--ink); padding:8px 10px; border:1px solid var(--line); border-radius:6px; background:#fff; }
+input:focus { outline:2px solid var(--accent); outline-offset:-1px; }
+.buttons { display:flex; gap:8px; }
+button { font:inherit; font-weight:500; padding:8px 16px; border-radius:6px; border:1px solid transparent; cursor:pointer; }
+button.run { background:var(--ok); color:#fff; }
+button.stop { background:var(--bad); color:#fff; }
+button:disabled { opacity:.45; cursor:default; }
+#status { margin:16px 0 8px; display:flex; gap:16px; align-items:center; color:var(--mute); min-height:24px; }
+#status b { color:var(--ink); }
+#bar { flex:1; height:6px; background:var(--line); border-radius:3px; overflow:hidden; }
+#bar i { display:block; height:100%; width:0; background:var(--accent); transition:width .3s; }
+#error { color:var(--bad); }
+#links { display:flex; gap:16px; margin:0 0 12px; }
+#links a { color:var(--accent); text-decoration:none; }
+#links a:hover { text-decoration:underline; }
+.hidden { display:none !important; }
+iframe { width:100%; height:760px; border:1px solid var(--line); border-radius:8px; background:#fff; }
+details { margin-top:12px; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:8px 14px; }
+summary { cursor:pointer; color:var(--mute); }
+#log { font:12px/1.6 "IBM Plex Mono", monospace; max-height:240px; overflow:auto; margin:8px 0 4px; padding:0; list-style:none; }
+#log li span { color:var(--mute); }
+@media (max-width:800px) { form { grid-template-columns:1fr 1fr; } }
+</style>
+</head>
+<body>
+<header><h1>ConfoundSearch</h1><span>find constructs that influence both X and Y</span></header>
+<main>
+  <form id="form">
+    <label>Independent variable (X)<input id="iv" required maxlength="200" value="IT investment"></label>
+    <label>Dependent variable (Y)<input id="dv" required maxlength="200" value="firm performance"></label>
+    <label>Max steps<input id="steps" type="number" min="1" max="1000" placeholder="automatic"></label>
+    <label>Exploration &epsilon; <small>(epsilon-greedy only)</small><input id="eps" type="number" min="0" max="1" step="0.05" value="0.1"></label>
+    <div class="buttons"><button class="run" id="run" type="submit">Find confounds</button><button class="stop" id="stop" type="button" disabled>Stop</button></div>
+  </form>
+  <div id="status"><span id="state">Enter a relationship and press Find confounds.</span><div id="bar" class="hidden"><i></i></div></div>
+  <div id="error"></div>
+  <div id="links" class="hidden">
+    <a id="dl-html" href="#">Download standalone HTML</a>
+    <a id="dl-zip" href="#">Download export (.zip)</a>
+    <a id="dl-json" href="#" target="_blank">share_data.json</a>
+    <a id="dl-audit" href="#" target="_blank" title="Every search, passage and verdict, hash-chained">Audit trail (.jsonl)</a>
+  </div>
+  <iframe id="view" class="hidden" sandbox="allow-scripts allow-popups" title="Results"></iframe>
+  <details id="logbox" class="hidden"><summary>Agent steps</summary><ol id="log"></ol></details>
+</main>
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var runId = null, timer = null, shown = -1, lastRefresh = 0;
+
+  function api(path, options) {
+    return fetch(path, options).then(function (r) {
+      return r.json().then(function (body) {
+        if (!r.ok) throw new Error(body.error || r.statusText);
+        return body;
+      });
+    });
+  }
+  function setBusy(busy) { $("run").disabled = busy; $("stop").disabled = !busy; }
+  function links(id) {
+    $("dl-html").href = "/runs/" + id + "/standalone.html?download=1";
+    $("dl-zip").href = "/api/runs/" + id + "/export.zip";
+    $("dl-json").href = "/api/runs/" + id + "/share_data.json";
+    $("dl-audit").href = "/api/runs/" + id + "/audit.jsonl";
+    $("links").classList.remove("hidden");
+  }
+  function render(run) {
+    var label = { running: "Searching", done: "Done", stopped: "Stopped", error: "Failed" }[run.status] || run.status;
+    $("state").innerHTML = "";
+    var b = document.createElement("b"); b.textContent = label;
+    $("state").append(b, " · step " + run.step + " of " + run.max_steps + " · Φ = " + run.phi.toFixed(2));
+    $("bar").classList.remove("hidden");
+    $("bar").firstChild.style.width = Math.min(100, 100 * run.step / run.max_steps) + "%";
+    $("error").textContent = run.error || "";
+    var log = $("log"); log.innerHTML = "";
+    run.steps.forEach(function (s) {
+      var li = document.createElement("li");
+      li.textContent = s.n + ". " + s.action + " ";
+      var r = document.createElement("span"); r.textContent = "ΔΦ " + s.reward.toFixed(2);
+      li.appendChild(r); log.appendChild(li);
+    });
+    $("logbox").classList.remove("hidden");
+    var finished = run.status !== "running";
+    var now = Date.now();
+    if (run.step !== shown && (finished || now - lastRefresh > 1500)) {
+      shown = run.step; lastRefresh = now;
+      $("view").src = "/runs/" + run.id + "/standalone.html?v=" + run.step;
+      $("view").classList.remove("hidden");
+    }
+    if (finished) { clearInterval(timer); setBusy(false); }
+  }
+  function poll() { api("/api/runs/" + runId).then(render).catch(function (e) { $("error").textContent = e.message; }); }
+
+  $("form").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    $("error").textContent = ""; shown = -1;
+    api("/api/runs", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ iv: $("iv").value, dv: $("dv").value, max_steps: +$("steps").value || null, epsilon: +$("eps").value })
+    }).then(function (run) {
+      runId = run.id; setBusy(true); links(runId); render(run);
+      clearInterval(timer); timer = setInterval(poll, 800);
+    }).catch(function (e) { $("error").textContent = e.message; });
+  });
+  $("stop").addEventListener("click", function () {
+    if (runId) api("/api/runs/" + runId + "/stop", { method: "POST" }).catch(function () {});
+  });
+})();
+</script>
+</body>
+</html>

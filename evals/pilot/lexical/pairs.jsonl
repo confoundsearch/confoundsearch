@@ -1,0 +1,25 @@
+{"x": "job stress", "y": "burnout", "rater_1": "none", "rater_2": "x_kind_of_y", "qwen": "none", "astra": "none"}
+{"x": "job stress", "y": "work pressure", "rater_1": "none", "rater_2": "none", "qwen": "none", "astra": "x_kind_of_y"}
+{"x": "turnover", "y": "turnover", "rater_1": "same", "rater_2": "same", "qwen": "same", "astra": "same"}
+{"x": "intention to quit", "y": "turnover", "rater_1": "y_kind_of_x", "rater_2": "y_kind_of_x", "qwen": "y_kind_of_x", "astra": "y_kind_of_x"}
+{"x": "job stress", "y": "distress", "rater_1": "none", "rater_2": "x_kind_of_y", "qwen": "same", "astra": "x_kind_of_y"}
+{"x": "organizational structure", "y": "hierarchy", "rater_1": "none", "rater_2": "none", "qwen": "same", "astra": "y_kind_of_x"}
+{"x": "firm performance", "y": "profitability", "rater_1": "y_kind_of_x", "rater_2": "y_kind_of_x", "qwen": "same", "astra": "none"}
+{"x": "job satisfaction", "y": "wellbeing", "rater_1": "none", "rater_2": "none", "qwen": "none", "astra": "none"}
+{"x": "CEO style", "y": "leadership style", "rater_1": "y_kind_of_x", "rater_2": "y_kind_of_x", "qwen": "same", "astra": "y_kind_of_x"}
+{"x": "market competition", "y": "rivalry", "rater_1": "x_kind_of_y", "rater_2": "x_kind_of_y", "qwen": "x_kind_of_y", "astra": "same"}
+{"x": "IT intensity", "y": "technology adoption", "rater_1": "x_kind_of_y", "rater_2": "x_kind_of_y", "qwen": "none", "astra": "x_kind_of_y"}
+{"x": "workforce skills", "y": "human capital", "rater_1": "y_kind_of_x", "rater_2": "none", "qwen": "none", "astra": "y_kind_of_x"}
+{"x": "firm age", "y": "organizational age", "rater_1": "x_kind_of_y", "rater_2": "x_kind_of_y", "qwen": "none", "astra": "y_kind_of_x"}
+{"x": "job satisfaction", "y": "job satisfaction", "rater_1": "same", "rater_2": "same", "qwen": "none", "astra": "y_kind_of_x"}
+{"x": "turnover", "y": "attrition", "rater_1": "y_kind_of_x", "rater_2": "y_kind_of_x", "qwen": "same", "astra": "y_kind_of_x"}
+{"x": "job stress", "y": "stress", "rater_1": "x_kind_of_y", "rater_2": "x_kind_of_y", "qwen": "none", "astra": "y_kind_of_x"}
+{"x": "turnover", "y": "voluntary exit", "rater_1": "y_kind_of_x", "rater_2": "x_kind_of_y", "qwen": "y_kind_of_x", "astra": "y_kind_of_x"}
+{"x": "firm performance", "y": "firm performance", "rater_1": "same", "rater_2": "same", "qwen": "none", "astra": "y_kind_of_x"}
+{"x": "job stress", "y": "workload", "rater_1": "same", "rater_2": "x_kind_of_y", "qwen": "x_kind_of_y", "astra": "none"}
+{"x": "organizational structure", "y": "decentralization", "rater_1": "y_kind_of_x", "rater_2": "y_kind_of_x", "qwen": "y_kind_of_x", "astra": "y_kind_of_x"}
+{"x": "market competition", "y": "industry concentration", "rater_1": "none", "rater_2": "none", "qwen": "none", "astra": "none"}
+{"x": "job satisfaction", "y": "burnout", "rater_1": "same", "rater_2": "x_kind_of_y", "qwen": "same", "astra": "same"}
+{"x": "CEO style", "y": "managerial discretion", "rater_1": "y_kind_of_x", "rater_2": "y_kind_of_x", "qwen": "y_kind_of_x", "astra": "y_kind_of_x"}
+{"x": "turnover", "y": "turnover intention", "rater_1": "none", "rater_2": "none", "qwen": "none", "astra": "none"}
+{"x": "IT intensity", "y": "digitalization", "rater_1": "y_kind_of_x", "rater_2": "y_kind_of_x", "qwen": "same", "astra": "y_kind_of_x"}

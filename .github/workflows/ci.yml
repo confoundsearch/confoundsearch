@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04  # still has Python 3.8
+    permissions:
+      contents: write  # lets the 3.13 leg commit the coverage badge
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install (Python 3.8 cannot build the package from source, so it runs from the checkout)
+        run: |
+          if [ "${{ matrix.python-version }}" = "3.8" ]; then
+            pip install "pytest>=8" "pytest-cov>=5" "hypothesis>=6" "ruff>=0.5" "mypy>=1.10" "pyyaml>=6" "rust-just>=1.17" "tomli>=2"
+            echo "PYTHONPATH=$PWD" >> "$GITHUB_ENV"
+          else
+            pip install -e ".[dev,release]"
+          fi
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: mypy confoundsearch devops/tools examples
+      - name: Run the tests
+        shell: bash
+        run: |
+          set +e
+          pytest --tb=short 2>&1 | tee pytest.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" != 0 ]; then
+            # a short summary as an annotation, so a failure can be read without opening the log
+            summary=$(grep -E "^(FAILED|ERROR|E  )|Required test coverage|^confoundsearch.*[0-9]+%.*[0-9]+-|^confoundsearch.*(9[0-9]|[0-8][0-9])%" pytest.log | grep -v " 100%" | head -40 | sed ':a;N;$!ba;s/\n/%0A/g')
+            echo "::error title=pytest failed on Python ${{ matrix.python-version }}::$summary"
+          fi
+          exit $status
+      - name: Update the coverage badge
+        if: matrix.python-version == '3.13' && github.event_name == 'push' && github.ref == 'refs/heads/orgsci'
+        run: |
+          python devops/tools/coverage_badge.py coverage.xml devops/badges/coverage.svg
+          if ! git diff --quiet -- devops/badges/coverage.svg || [ -n "$(git ls-files --others badges)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add devops/badges/coverage.svg
+            git commit -m "Update coverage badge [skip ci]"
+            git push || echo "badge push skipped (branch moved)"
+          fi
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install build twine
+      - run: python -m build
+      - run: twine check dist/*
+      - name: Install the wheel into a clean environment
+        run: |
+          python -m venv /tmp/clean
+          /tmp/clean/bin/pip install dist/*.whl
+          /tmp/clean/bin/confoundsearch --version
+          /tmp/clean/bin/confoundsearch install-skill --dir /tmp/skills
+          test -s /tmp/skills/confoundsearch/SKILL.md
+          /tmp/clean/bin/confoundsearch audit --help > /dev/null
+          /tmp/clean/bin/python -c "import confoundsearch.interface.ui, importlib.resources as r; r.files('confoundsearch.interface.ui').joinpath('app.html').read_bytes()"

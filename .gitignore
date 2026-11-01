@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+.coverage
+coverage.xml
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.hypothesis/
+*.egg-info/
+dist/
+build/
+.env
+.env.*
+
+# output of devops/tools/keyword_vectors.py
+keyword_vectors/
+keyword_neighbors.md
