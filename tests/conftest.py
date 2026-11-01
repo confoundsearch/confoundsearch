@@ -19,6 +19,12 @@ def hermetic_git(monkeypatch, git_identity):
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
 
 
+@pytest.fixture(autouse=True)
+def private_cache(monkeypatch, tmp_path_factory):
+    """No test may read or fill the saved searches in the real home folder."""
+    monkeypatch.setenv("CONFOUNDSEARCH_CACHE", str(tmp_path_factory.mktemp("cache")))
+
+
 IV = "IT investment"
 DV = "firm performance"
 

@@ -15,12 +15,18 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from collections.abc import Callable, Sequence
+from typing import Callable, Sequence
 
 from confoundsearch.data.vectors import Match, VectorRecord, VectorStore
 from confoundsearch.errors import VectorStoreError
 
 Embedder = Callable[[str], Sequence[float]]
+
+
+class KeywordNotFound(VectorStoreError):
+    """The name is not a keyword, and there is no embedder to search for it as a phrase."""
+
+
 DISTINCT_POOL = (
     100  # how many neighbours to ask for, at least, when the echoes of the query are to be dropped
 )
@@ -84,7 +90,7 @@ class KeywordIndex:
         else:
             embed = embedder or self.embedder
             if embed is None:
-                raise VectorStoreError(
+                raise KeywordNotFound(
                     f"no keyword named {name!r}; to search by any phrase, give the index an embedder"
                 )
             found, phrase = self.store.query(embed(name), wanted, flt), name

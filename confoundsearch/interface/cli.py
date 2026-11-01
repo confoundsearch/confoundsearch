@@ -30,12 +30,15 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 from confoundsearch import __version__
+from confoundsearch.data.cache import CachedCorpus, cache_dir, flush, wait_for_writes
 from confoundsearch.data.corpus import Corpus, InMemoryCorpus
+from confoundsearch.data.demo import DEMO_QUESTION, DemoCorpus
 from confoundsearch.data.es import ElasticsearchCorpus
+from confoundsearch.data.keyword_service import HttpCorpus, service_url
 from confoundsearch.data.multi import MultiCorpus
 from confoundsearch.data.sources import OpenAlexCorpus, SemanticScholarCorpus
 from confoundsearch.dotenv import keep_out_of_git, load_dotenv, update_dotenv
-from confoundsearch.errors import RemoteError
+from confoundsearch.errors import BudgetReached, RemoteError
 from confoundsearch.http import Transport, resilient, urllib_transport
 from confoundsearch.interface.export import to_share_data
 from confoundsearch.interface.known import load_known, page_from_json
@@ -46,6 +49,7 @@ from confoundsearch.interface.server import RunManager, make_server
 from confoundsearch.interface.ui import standalone_html
 from confoundsearch.logic.actions import AddConfound, AddEdge, AttachPassage, Merge, Retrieve
 from confoundsearch.logic.audit import AuditedClient, AuditLog, AuditTrail
+from confoundsearch.logic.audit import current as current_log
 from confoundsearch.logic.deterministic import DeterministicPolicy
 from confoundsearch.logic.episode import ActionSource, Step, Trajectory, run_episode
 from confoundsearch.logic.expand import ExpandedCorpus
@@ -118,6 +122,10 @@ def status_text(event: dict[str, Any]) -> str | None:
             return f"{where} said HTTP {event['status']}; giving up on this search"
     if kind == "source_failed":
         return f"{event['source']} failed, carrying on with the other sources"
+    if kind == "source_skipped":
+        return f"{event['source']} is resting after a failure; trying it again in {event['retry_in']:g}s"
+    if kind == "source_recovered":
+        return f"{event['source']} is answering again"
     return None
 
 
@@ -194,12 +202,25 @@ class StatusLine:
 
 
 class Announced:
-    """A chat client that tells the run log before each call, so the status line can say it is waiting."""
+    """A chat client that tells the run log before each call, so the status line can say it is waiting, and
+    refuses the next call once the estimated spend has reached `budget` dollars."""
 
-    def __init__(self, client: ChatClient, log: Callable[..., None] | None) -> None:
-        self.client, self.log, self.model = client, log, getattr(client, "model", None)
+    def __init__(
+        self, client: ChatClient, log: Callable[..., None] | None, budget: float | None = None
+    ) -> None:
+        self.client, self.log, self.budget = client, log, budget
+        self.model = getattr(client, "model", None)
+        self.spend = getattr(client, "spend", None)  # the client's own count of what it has cost
+
+    @property
+    def dollars(self) -> float:
+        return float(self.spend.dollars) if self.spend is not None else 0.0
 
     def chat(self, messages: Sequence[Mapping[str, str]]) -> str:
+        if self.budget is not None and self.dollars >= self.budget:
+            raise BudgetReached(
+                f"the language model has cost about ${self.dollars:.2f}, the budget of ${self.budget:.2f}"
+            )
         if self.log:
             self.log("asking_model", model=self.model)
         return self.client.chat(messages)
@@ -245,11 +266,28 @@ def build_parser() -> argparse.ArgumentParser:
         "--corpus",
         action="append",
         metavar="SOURCE",
-        help="where to search: elasticsearch, semanticscholar, openalex, file, or all (the default: the "
+        help="where to search: service, elasticsearch, semanticscholar, openalex, file, demo (a few hundred "
+        "shipped papers, searched offline), or all (the default: the keyword service if --api is set, the "
         "hosted index if ES_URL is set, plus Semantic Scholar and OpenAlex). Repeat it, or separate with "
-        "commas, to search several at once; results are merged and duplicates removed",
+        "commas, to search several at once; results are merged and duplicates removed, and a source that "
+        "is down is skipped",
     )
     papers.add_argument("--corpus-file", type=Path, help="JSONL with id, text, and optionally title, url")
+    papers.add_argument(
+        "--cache-dir",
+        type=Path,
+        default=None,
+        help="the data directory, where searches are saved so they are made only once (default: "
+        "$CONFOUNDSEARCH_CACHE, else a folder in the system's temporary directory); empty it with "
+        "`confoundsearch flush`",
+    )
+    papers.add_argument("--no-cache", action="store_true", help="always search; save nothing")
+    papers.add_argument(
+        "--api",
+        help="address of the ConfoundSearch service, which searches papers for you with no key of yours "
+        "(default: $CONFOUNDSEARCH_API, else the address built into confoundsearch, if it has one). Your "
+        "search terms are sent to it. `--api off` switches it off",
+    )
     papers.add_argument("--es-url", default=env("ES_URL"), help="Elasticsearch endpoint (default: $ES_URL)")
     papers.add_argument("--es-index", default="papers")
     papers.add_argument("--es-api-key", default=env("ES_API_KEY"), help="default: $ES_API_KEY")
@@ -274,6 +312,13 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--dv", required=True)
     run.add_argument(
         "--max-steps", type=int, help="most moves to make (default: deterministic 1000, epsilon-greedy 40)"
+    )
+    run.add_argument(
+        "--max-budget",
+        type=float,
+        metavar="USD",
+        help="stop once the language model has cost about this many dollars (an estimate from tokens used); "
+        "what was found so far is kept",
     )
     run.add_argument("--epsilon", type=float, default=0.1, help="epsilon-greedy only")
     run.add_argument("--seed", type=int, help="epsilon-greedy only: makes its choices repeatable")
@@ -301,6 +346,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="when done, review the page just written: ui (the default) opens it, text prints it here",
     )
 
+    demo = commands.add_parser(
+        "demo",
+        help="the happy path: run the shipped demo papers on organizational structure and firm performance, "
+        "then open the result",
+    )
+    demo.add_argument(
+        "--model", help="default: gpt-4.1-mini, or openai/gpt-4.1-mini with only an OpenRouter key"
+    )
+    demo.add_argument("--base-url", help="default: $OPENAI_BASE_URL or https://api.openai.com/v1")
+    demo.add_argument("--api-key", help="default: $OPENAI_API_KEY (with --openrouter: $OPENROUTER_API_KEY)")
+    demo.add_argument("--openrouter", action="store_true", help="use OpenRouter")
+    demo.add_argument("--out", type=Path, default=Path("confoundsearch-demo.html"))
+    demo.add_argument("--confounds", type=int, default=4, metavar="N", help="how many confounds to look for")
+    demo.add_argument("--max-budget", type=float, default=1.0, metavar="USD", help="stop at about this cost")
+    demo.add_argument("--no-open", action="store_true", help="write the page but do not open it")
+
     audit = commands.add_parser("audit", help="check and read an audit trail written by a run")
     audit.add_argument("file", type=Path, help="an audit trail (.jsonl)")
     audit.add_argument(
@@ -321,6 +382,14 @@ def build_parser() -> argparse.ArgumentParser:
     review.add_argument(
         "--format", choices=REVIEW_FORMATS, default="ui", help="ui opens a browser (default); text prints"
     )
+    flush_cmd = commands.add_parser("flush", help="delete the searches saved on this machine")
+    flush_cmd.add_argument(
+        "--cache-dir",
+        type=Path,
+        help="default: $CONFOUNDSEARCH_CACHE, else a folder in the system's temporary directory",
+    )
+    flush_cmd.add_argument("--iv", help="only this question's database (with --dv); default: all of them")
+    flush_cmd.add_argument("--dv")
     setup = commands.add_parser("setup", help="ask for your API keys and write them to a .env file")
     setup.add_argument("--env-file", type=Path, default=Path(".env"))
     skill = commands.add_parser(
@@ -338,7 +407,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-CORPORA = ("elasticsearch", "semanticscholar", "openalex", "file")
+CORPORA = ("service", "elasticsearch", "semanticscholar", "openalex", "file", "demo")
 S2_INTERVAL = 1.1  # seconds between Semantic Scholar requests: its keyed limit is one a second
 OPENALEX_INTERVAL = 0.2
 POLICIES = ("deterministic", "epsilon-greedy")
@@ -356,9 +425,18 @@ def corpus_names(args: argparse.Namespace) -> list[str]:
         raise SystemExit("error: --corpus-file goes with --corpus file, not with another source")
     if "file" in names and not args.corpus_file:
         raise SystemExit("error: --corpus file needs --corpus-file PATH")
-    everything = ["elasticsearch"] * bool(args.es_url) + ["semanticscholar", "openalex"]
+    everything = (
+        ["service"] * bool(service_url(args.api))
+        + ["elasticsearch"] * bool(args.es_url)
+        + ["semanticscholar", "openalex"]
+    )
     expanded = [n for name in names for n in (everything if name == "all" else [name])]
     wanted = list(dict.fromkeys(expanded))
+    if "service" in wanted and not service_url(args.api):
+        raise SystemExit(
+            "error: the service has no address (or is switched off): give --api URL, or CONFOUNDSEARCH_API "
+            "in .env; or pick another source: --corpus semanticscholar, --corpus openalex, --corpus-file PATH"
+        )
     if "elasticsearch" in wanted and not args.es_url:
         raise SystemExit(
             "error: the hosted Elasticsearch index needs ES_URL and ES_API_KEY (put them in a .env file), "
@@ -377,6 +455,8 @@ def build_corpus(args: argparse.Namespace) -> Corpus:
 
     makers: dict[str, Callable[[], Corpus]] = {
         "file": lambda: InMemoryCorpus.from_jsonl(args.corpus_file),
+        "demo": DemoCorpus,
+        "service": lambda: HttpCorpus(service_url(args.api)),
         "semanticscholar": lambda: SemanticScholarCorpus(args.s2_key, transport=paced(S2_INTERVAL)),
         "openalex": lambda: OpenAlexCorpus(
             args.openalex_key, args.openalex_email, transport=paced(OPENALEX_INTERVAL)
@@ -385,7 +465,15 @@ def build_corpus(args: argparse.Namespace) -> Corpus:
             args.es_url, args.es_index, args.es_api_key, transport=paced(0.0)
         ),
     }
-    stores = {name: makers[name]() for name in corpus_names(args)}
+    folder = args.cache_dir or cache_dir()
+    stores = {
+        name: (
+            store
+            if name in ("file", "demo") or args.no_cache
+            else CachedCorpus(store, folder, name, log, current_question)
+        )
+        for name, store in ((name, makers[name]()) for name in corpus_names(args))
+    }
     if len(stores) == 1:
         return next(iter(stores.values()))
     return MultiCorpus(stores, log)
@@ -437,6 +525,8 @@ def describe_run(args: argparse.Namespace) -> dict[str, Any]:
         "confounds": args.confounds,
         "synonyms": synonym_count(args),
         "max_steps": args.max_steps,
+        "max_budget": args.max_budget,
+        "cache": None if args.no_cache else str(args.cache_dir or cache_dir()),
         "sources": corpus_names(args) if not args.corpus_file or args.corpus else ["file"],
         "keys_present": {
             "model": bool(key),
@@ -449,7 +539,9 @@ def describe_run(args: argparse.Namespace) -> dict[str, Any]:
 
 def build_backend(args: argparse.Namespace) -> Backend:
     runlog = getattr(args, "runlog", None)
-    client = AuditedClient(Announced(build_client(args), runlog.event if runlog else None))
+    client = AuditedClient(
+        Announced(build_client(args), runlog.event if runlog else None, getattr(args, "max_budget", None))
+    )
     corpus = build_corpus(args)
     if (
         args.policy == "deterministic"
@@ -500,6 +592,65 @@ def review(path: Path, format: str) -> int:
 SERVICES = {"1": "OPENROUTER_API_KEY", "2": "OPENAI_API_KEY"}
 
 
+def current_question() -> tuple[str, str] | None:
+    """The independent and dependent variable of the run this thread is part of, if there is one."""
+    log = current_log()
+    for event in log.events if log is not None else ():
+        if event.kind == "run_started":
+            return str(event.data["independent_variable"]), str(event.data["dependent_variable"])
+    return None
+
+
+DEMO_IV, DEMO_DV = DEMO_QUESTION
+
+
+def demo_model(args: argparse.Namespace) -> str | None:
+    """The model for the demo: the one asked for, else a small cheap one that fits the key that is set."""
+    if args.model:
+        return str(args.model)
+    only_openrouter = os.environ.get("OPENROUTER_API_KEY") and not (
+        args.api_key or os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENAI_BASE_URL")
+    )
+    if args.openrouter or only_openrouter:
+        return "openai/gpt-4.1-mini"
+    if args.api_key or os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENAI_BASE_URL"):
+        return "gpt-4.1-mini"
+    return None
+
+
+def demo(args: argparse.Namespace) -> int:
+    """Run the demo papers through `run`, so the demo is the real program on a small known question."""
+    model = demo_model(args)
+    if model is None:
+        print(
+            "error: no language model key found; run `confoundsearch setup` first (or set OPENAI_API_KEY)",
+            file=sys.stderr,
+        )
+        return 1
+    argv = ["run", "--corpus", "demo", "--model", model, "--iv", DEMO_IV, "--dv", DEMO_DV]
+    argv += ["--confounds", str(args.confounds), "--max-budget", str(args.max_budget), "--out", str(args.out)]
+    for flag, value in (("--base-url", args.base_url), ("--api-key", args.api_key)):
+        argv += [flag, value] if value else []
+    argv += ["--openrouter"] if args.openrouter else []
+    argv += [] if args.no_open else ["--review"]
+    return main(argv)
+
+
+def flush_saved(args: argparse.Namespace) -> int:
+    """Empty the saved searches: all of them, or those of one --iv/--dv question."""
+    if (args.iv is None) != (args.dv is None):
+        print(
+            "error: give both --iv and --dv to empty one question, or neither to empty everything",
+            file=sys.stderr,
+        )
+        return 1
+    folder = args.cache_dir or cache_dir()
+    question = (args.iv, args.dv) if args.iv is not None else None
+    searches, papers, freed = flush(folder, question)
+    print(f"removed {searches} saved searches and {papers} papers ({freed / 1_000_000:.1f} MB) from {folder}")
+    return 0
+
+
 def setup(args: argparse.Namespace) -> int:
     """Ask for the language-model key and, optionally, a Semantic Scholar key; keep them in a private .env."""
     choice = input("Language model: 1) OpenRouter  2) OpenAI [1]: ").strip() or "1"
@@ -515,6 +666,16 @@ def setup(args: argparse.Namespace) -> int:
     if not values:
         print("error: no key given; nothing written", file=sys.stderr)
         return 1
+    here = cache_dir()
+    print(
+        "\nConfoundSearch downloads papers as it searches and keeps them in a data directory, like Hugging\n"
+        f"Face's model folder. Now: {here}\n"
+        "Unless you choose another folder this is in your system's temporary directory, which is emptied\n"
+        "from time to time. Empty it yourself any time with `confoundsearch flush`."
+    )
+    folder = input("Folder to keep downloaded papers in (Enter to leave it as it is): ").strip()
+    if folder:
+        values["CONFOUNDSEARCH_CACHE"] = str(Path(folder).expanduser().resolve())
     update_dotenv(args.env_file, values)
     print(f"wrote {', '.join(values)} to {args.env_file} (not shown here)")
     if keep_out_of_git(args.env_file):
@@ -577,6 +738,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         runlog.event("run_started", **describe_run(args))
     if args.command == "setup":
         return setup(args)
+    if args.command == "flush":
+        return flush_saved(args)
+    if args.command == "demo":
+        return demo(args)
     if args.command == "install-skill":
         return install_skill(args)
     if args.command == "audit":
@@ -607,6 +772,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             pass
         finally:
             server.server_close()
+            wait_for_writes()  # saved searches still waiting to be written land before the program ends
         return 0
     policy = build_policy(args, backend)
     max_steps = args.max_steps or (RUN_STEPS if args.policy == "deterministic" else 40)
@@ -616,6 +782,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             parents=True, exist_ok=True
         )  # `--out results/org.html` makes results/ if it is not there
     failed: str | None = None
+    stopped: str | None = None
     with AuditLog(audit_path) as log:
         steps: list[Step] = []
         print(f"{EPIGRAPH}\n", file=sys.stderr)
@@ -640,6 +807,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             trajectory = run_episode(
                 env, policy, proposer, args.iv, args.dv, max_steps, on_step=show, audit=log
             )
+        except BudgetReached as err:  # the money allowed has been spent: a planned stop, with partial results
+            stopped = str(err)
+            trajectory = Trajectory(env.initial_state(args.iv, args.dv), steps, audit=log)
+            runlog.event("budget_reached", message=stopped, steps=len(steps))
         except RemoteError as err:  # a search or the model refused: keep what the run had found so far
             failed = f"{type(err).__name__}: {err}"
             trajectory = Trajectory(env.initial_state(args.iv, args.dv), steps, audit=log)
@@ -650,15 +821,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise
         finally:
             args.status.stop()
-    if failed is None:
-        runlog.event("run_finished", steps=len(steps), score=round(trajectory.score, 4))
+    spent = float(getattr(getattr(backend.client, "client", None), "dollars", 0.0))
+    if failed is None and stopped is None:
+        runlog.event("run_finished", steps=len(steps), score=round(trajectory.score, 4), cost=round(spent, 4))
     runlog.close()
+    wait_for_writes()  # the searches this run made are on disk before it says it is done
     share = to_share_data(trajectory.final)
     args.out.write_text(standalone_html(share), encoding="utf-8")
     if args.json:
         result = run_result(trajectory, args.out, audit_path)
         if failed:
             result["error"] = failed
+        if stopped:
+            result["stopped"] = stopped
         print(json.dumps(result, indent=2))
     else:
         graph = trajectory.final.graph
@@ -666,11 +841,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"{len(trajectory.steps)} steps, {len(graph.connected())} connected, phi={trajectory.score:.3f}"
         )
         print(where_it_went(args.out, audit_path, trajectory.audit_trail().intact, runlog.path))
+        if spent:
+            print(f"language model cost, estimated from tokens: about ${spent:.2f}")
     if failed:
         print(
             f"error: the run stopped early: {failed}\nWhat it had found so far is in {args.out}; "
             f"what happened is in {runlog.path}.",
             file=sys.stderr,
+        )
+    if stopped:
+        print(
+            f"stopped at the budget: {stopped}. What it had found so far is in {args.out}.", file=sys.stderr
         )
     if args.review == "text":
         print(review_text(share), end="")

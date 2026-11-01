@@ -43,6 +43,7 @@ include = ["confoundsearch*"]
 
 [tool.setuptools.package-data]
 "confoundsearch" = ["py.typed"]
+"confoundsearch.data" = ["demo.sqlite3"]
 "confoundsearch.interface.skill" = ["SKILL.md", "UI_SKILL.md"]
 "confoundsearch.interface.ui" = ["app.html", "page.css", "page.js"]
 

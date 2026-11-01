@@ -42,6 +42,7 @@ SESSION = "claude" + ".ai/code"
 LAYERS = ("data", "logic", "model", "interface")
 REQUIRED_IN_WHEEL = (
     f"{NAME}/py.typed",
+    f"{NAME}/data/demo.sqlite3",
     f"{NAME}/interface/skill/SKILL.md",
     f"{NAME}/interface/skill/UI_SKILL.md",
     f"{NAME}/interface/ui/app.html",

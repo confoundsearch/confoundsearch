@@ -189,6 +189,7 @@ def test_update_with_nothing_new_pushes_nothing(source, dest):
     update(source, dest, env={"ASSUME_YES": "1"})
     result = update(source, dest, env={"ASSUME_YES": "1"})
     assert result.returncode == 0 and "Nothing new" in result.stdout and pushed(dest) == "1"
+    assert "Verified" in result.stdout  # still checked against the remote, even with nothing to push
 
 
 def test_update_says_when_it_cannot_clone(source, tmp_path):
@@ -332,3 +333,11 @@ def test_it_never_replaces_a_folder_that_is_not_a_clone_or_this_repository(sourc
     assert result.returncode == 2 and "refusing" in result.stderr and (other / "thesis.txt").exists()
     result = update(source, source, env={"ASSUME_YES": "1", "REVIEW_REMOTE": str(tmp_path / "x.git")})
     assert result.returncode == 2 and "this repository" in result.stderr and (source / "a.txt").exists()
+
+
+def test_the_check_counts_the_files_that_should_be_there_without_the_left_out_ones(with_examples, dest):
+    result = update(with_examples, dest, env={"ASSUME_YES": "1"})
+    assert result.returncode == 0, result.stderr
+    assert "all 3 files" in result.stdout and "without: examples" in result.stdout
+    result = update(with_examples, dest, env={"ASSUME_YES": "1", "EXCLUDE": ""})
+    assert "all 4 files" in result.stdout and "without" not in result.stdout

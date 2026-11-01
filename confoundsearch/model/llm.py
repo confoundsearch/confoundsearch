@@ -23,6 +23,7 @@ from confoundsearch.http import Transport, urllib_transport
 from confoundsearch.logic.actions import Action, AddConfound, Merge, Retrieve, enumerate_actions
 from confoundsearch.logic.graph import Passage, Vertex, normalize
 from confoundsearch.logic.state import State
+from confoundsearch.model.cost import Spend
 
 Message = Mapping[str, str]
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
@@ -70,6 +71,7 @@ class OpenAICompatibleClient:
         self.timeout = timeout
         self.transport = transport
         self.extra_headers = dict(extra_headers or {})
+        self.spend = Spend(model)  # what the calls so far have cost, estimated
 
     @classmethod
     def openrouter(cls, model: str, api_key: str | None = None, **kwargs: Any) -> OpenAICompatibleClient:
@@ -105,6 +107,7 @@ class OpenAICompatibleClient:
             raise LLMError(f"unexpected response: {raw[:200]!r}") from err
         if not isinstance(content, str):
             raise LLMError(f"response content is not text: {content!r}")
+        self.spend.add(data.get("usage"))
         return content
 
 

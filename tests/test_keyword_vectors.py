@@ -735,3 +735,68 @@ def test_main_query_distinct(monkeypatch, capsys, tmp_path):
     )
     out = capsys.readouterr().out
     assert "large firms" in out and "firm size" not in out
+
+
+def test_query_through_the_service_needs_no_keys_for_a_keyword(monkeypatch, capsys, tmp_path):
+    seen = []
+
+    class Service:
+        def __init__(self, url, embedder=None):
+            seen.append((url, embedder))
+
+        def query(self, name, k, min_works, distinct):
+            from confoundsearch import Match
+
+            seen.append((name, k, min_works, distinct))
+            return [Match("large-firms", 0.9, {"name": "large firms", "works": 600})]
+
+    monkeypatch.setattr(kv, "KeywordService", Service)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    argv = [
+        "query",
+        "firm size",
+        "--api",
+        "https://svc.test",
+        "--out",
+        str(tmp_path),
+        "-k",
+        "3",
+        "--distinct",
+    ]
+    assert kv.main(argv) == 0
+    assert "0.900  large firms  (600 papers)" in capsys.readouterr().out
+    assert seen[0] == ("https://svc.test", None) and seen[1] == ("firm size", 3, 0, True)
+
+
+def test_query_through_the_service_embeds_a_phrase_with_your_own_key(monkeypatch, tmp_path):
+    seen = []
+
+    class Service:
+        def __init__(self, url, embedder=None):
+            seen.append(embedder)
+
+        def query(self, name, k, min_works, distinct):
+            return []
+
+    monkeypatch.setattr(kv, "KeywordService", Service)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-mine")
+    kv.main(["query", "x", "--api", "https://svc.test", "--out", str(tmp_path)])
+    assert seen[0].api_key == "sk-mine" and seen[0].dims == 512
+
+
+def test_query_through_the_service_reports_a_missing_keyword_plainly(monkeypatch, tmp_path):
+    from confoundsearch import KeywordNotFound
+
+    class Service:
+        def __init__(self, url, embedder=None):
+            pass
+
+        def query(self, name, k, min_works, distinct):
+            raise KeywordNotFound(
+                "no keyword named 'x'; to search any phrase, give an embedder (an OpenAI key)"
+            )
+
+    monkeypatch.setattr(kv, "KeywordService", Service)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    with pytest.raises(SystemExit, match="an OpenAI key"):
+        kv.main(["query", "x", "--api", "https://svc.test", "--out", str(tmp_path)])

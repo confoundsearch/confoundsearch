@@ -15,9 +15,9 @@ from __future__ import annotations
 import json
 import math
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Mapping, Protocol
 from urllib.parse import quote, unquote, urlencode
 
 from confoundsearch.errors import HttpError, RemoteError, VectorStoreError
@@ -41,6 +41,11 @@ class Match:
         float  # higher is closer for cosine and dotproduct; for euclidean it is a distance, lower is closer
     )
     metadata: Metadata = field(default_factory=dict)
+
+
+def _bare(host: str) -> str:
+    """`host` without a leading https:// (str.removeprefix needs Python 3.9)."""
+    return host[len("https://") :] if host.startswith("https://") else host
 
 
 class VectorStore(Protocol):
@@ -180,6 +185,41 @@ def plan_limit_reached(err: Exception) -> bool:
     return "upgrade your plan" in text or "limit for the current month" in text
 
 
+def json_call(
+    transport: Transport,
+    url: str,
+    headers: Mapping[str, str],
+    payload: Mapping[str, Any] | None,
+    timeout: float,
+    sleep: Callable[[float], None],
+    tries: int = 5,
+) -> Any:
+    """GET when there is no payload, else POST; the reply is JSON. Retries rate limits and server errors.
+
+    A server's own "wait N seconds" is honoured (up to 30). A plan limit is never retried: waiting does not
+    cure it.
+    """
+    body = None if payload is None else json.dumps(payload).encode()
+    attempt = 0
+    while True:
+        try:
+            raw = transport(url, headers, body, timeout)
+            break
+        except RemoteError as err:
+            attempt += 1
+            retryable = (
+                isinstance(err, HttpError) and err.status in RETRY_STATUS and not plan_limit_reached(err)
+            )
+            if not (retryable and attempt < tries):
+                raise VectorStoreError(str(err)) from err
+            asked = err.retry_after if isinstance(err, HttpError) else None
+            sleep(min(asked if asked else 2.0 ** (attempt - 1), 30.0))
+    try:
+        return json.loads(raw) if raw.strip() else {}
+    except ValueError as err:
+        raise VectorStoreError(f"unexpected response: {raw[:200]!r}") from err
+
+
 class PineconeVectorStore:
     """One Pinecone serverless index, reached over REST. Create it with `create_index`, then use it."""
 
@@ -203,7 +243,7 @@ class PineconeVectorStore:
         self.namespace = namespace
         self.cloud = cloud
         self.region = region
-        self.host = host.removeprefix("https://") if host else None
+        self.host = _bare(host) if host else None
         self.control_url = control_url.rstrip("/")
         self.api_version = api_version
         self.timeout = timeout
@@ -212,31 +252,13 @@ class PineconeVectorStore:
         self.ready_timeout = ready_timeout
 
     def _call(self, url: str, payload: Mapping[str, Any] | None, tries: int = 5) -> Any:
-        """GET when there is no payload, else POST. Retries rate limits and server errors."""
         headers = {
             "Api-Key": self.api_key,
             "Content-Type": "application/json",
             "Accept": "application/json",
             "X-Pinecone-API-Version": self.api_version,
         }
-        body = None if payload is None else json.dumps(payload).encode()
-        attempt = 0
-        while True:
-            try:
-                raw = self.transport(url, headers, body, self.timeout)
-                break
-            except RemoteError as err:
-                attempt += 1
-                retryable = (
-                    isinstance(err, HttpError) and err.status in RETRY_STATUS and not plan_limit_reached(err)
-                )
-                if not (retryable and attempt < tries):
-                    raise VectorStoreError(str(err)) from err
-                self.sleep(min(2.0 ** (attempt - 1), 30.0))
-        try:
-            return json.loads(raw) if raw.strip() else {}
-        except ValueError as err:
-            raise VectorStoreError(f"unexpected response: {raw[:200]!r}") from err
+        return json_call(self.transport, url, headers, payload, self.timeout, self.sleep, tries)
 
     def create_index(self, dimension: int, metric: str = "cosine") -> None:
         if metric not in METRICS:
@@ -254,7 +276,7 @@ class PineconeVectorStore:
         while True:
             info = self._call(f"{self.control_url}/indexes/{self.index}", None)
             if (info.get("status") or {}).get("ready") and info.get("host"):
-                self.host = str(info["host"]).removeprefix("https://")
+                self.host = _bare(str(info["host"]))
                 if info.get("dimension") not in (None, dimension):
                     raise VectorStoreError(f"index {self.index!r} exists with {info['dimension']} dimensions")
                 return
@@ -268,7 +290,7 @@ class PineconeVectorStore:
             info = self._call(f"{self.control_url}/indexes/{self.index}", None)
             if not info.get("host"):
                 raise VectorStoreError(f"index {self.index!r} has no host yet: call create_index first")
-            self.host = str(info["host"]).removeprefix("https://")
+            self.host = _bare(str(info["host"]))
         return f"https://{self.host}{path}"
 
     @staticmethod

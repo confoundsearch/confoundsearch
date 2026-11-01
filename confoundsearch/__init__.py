@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from confoundsearch.data.corpus import Corpus, InMemoryCorpus
 from confoundsearch.data.es import ElasticsearchCorpus
-from confoundsearch.data.keyword_index import KeywordIndex, slugify, without_echoes
+from confoundsearch.data.keyword_index import KeywordIndex, KeywordNotFound, slugify, without_echoes
+from confoundsearch.data.keyword_service import HttpCorpus, HttpVectorStore, KeywordService
 from confoundsearch.data.sources import OpenAlexCorpus, SemanticScholarCorpus
 from confoundsearch.data.vectors import (
     InMemoryVectorStore,
@@ -34,6 +35,7 @@ from confoundsearch.logic.policy import EpsilonGreedy, LookaheadQ, Softmax
 from confoundsearch.logic.reward import phi, reward
 from confoundsearch.logic.state import State
 from confoundsearch.logic.transition import Environment, Judge
+from confoundsearch.model.embeddings import OpenAIEmbedder
 from confoundsearch.model.llm import (
     LLMConfounds,
     LLMJudge,
@@ -62,11 +64,15 @@ __all__ = [
     "EpsilonGreedy",
     "ExpandedCorpus",
     "Graph",
+    "HttpCorpus",
+    "HttpVectorStore",
     "InMemoryCorpus",
     "InMemoryVectorStore",
     "InvalidAction",
     "Judge",
     "KeywordIndex",
+    "KeywordNotFound",
+    "KeywordService",
     "LLMConfounds",
     "LLMError",
     "LLMJudge",
@@ -77,6 +83,7 @@ __all__ = [
     "Match",
     "Merge",
     "OpenAICompatibleClient",
+    "OpenAIEmbedder",
     "OpenAlexCorpus",
     "Passage",
     "PineconeVectorStore",

@@ -17,19 +17,49 @@ See our submission documents for more.
 ```bash
 pip install confoundsearch        # 1. install (Python 3.8+)
 confoundsearch setup              # 2. save your keys in a .env file (language model, Semantic Scholar)
-confoundsearch install-skill      # 3. optional: add the Claude skill
+confoundsearch demo               # 3. the happy path: a short run on papers that ship with the package, then opens it
+confoundsearch install-skill      # 4. optional: add the Claude skill
 
 # A run can be slow; we are working to reduce latency. See below.
-# 4A. in Claude Code:  /confoundsearch iv="Organizational structure" dv="Firm performance"
-# 4B. or run the package directly:
-confoundsearch run --corpus semanticscholar --model qwen/qwen3-max \
+# 5A. in Claude Code:  /confoundsearch iv="Organizational structure" dv="Firm performance"
+# 5B. or run the package directly (it searches every source you have set up):
+confoundsearch run --model qwen/qwen3-max \
   --iv "Organizational structure" --dv "Firm performance" \
-  --out results/org.html
+  --max-budget 1.00 --out results/org.html
 
-confoundsearch review --in results/org.html     # 5. open the interface: the confounds as a causal graph
+confoundsearch review --in results/org.html     # 6. open the interface: the confounds as a causal graph
 ```
 
-We suggest running in a tmux/screen session or side terminal. See the technical appendix for more.
+`demo` needs only a language model key (no searching), costs a few cents and takes a couple of minutes. We suggest running
+longer jobs in a tmux/screen session or side terminal. See the technical appendix for more.
+
+## Keys
+
+`confoundsearch setup` asks for your keys and keeps them in a private `.env` file in the folder you run from (it is added to
+`.gitignore`, and a key is only ever sent to the service it belongs to). Why each one:
+
+- **Language model** (`OPENROUTER_API_KEY` or `OPENAI_API_KEY`): required. The agent reads each paper's abstract and
+  judges whether it supports a causal claim, so every run makes model calls. Any OpenAI-compatible model works (`--model`).
+- **OpenAI** (`OPENAI_API_KEY`): also set this, even if the agent uses another model. Searching the keyword vectors for a
+  phrase that is not already in the pre-indexed set embeds that phrase with an OpenAI embedding model.
+- **Semantic Scholar** (`S2_KEY`, free from semanticscholar.org/product/api): optional but worth the two minutes. Without a
+  key you share a rate limit with every anonymous user, searches get refused (HTTP 429) and runs slow down or stop early.
+- **OpenAlex** (`OPENALEX_EMAIL` or `OPENALEX_API_KEY`): optional; an email puts you in OpenAlex's faster, more reliable pool.
+
+A run usually costs less than $1 in model fees; the searches are free. Cap it with `--max-budget USD`: the run stops once the
+estimated model cost reaches that, and keeps what it found so far.
+
+## Data directory
+
+ConfoundSearch downloads papers as it searches and keeps them in a data directory, the way `transformers` keeps models in
+`HF_HOME`. It holds one small SQLite database per question (independent and dependent variable), so the same search is never
+made twice: reruns are fast, use no rate limit, and return the same papers. Each paper is stored once, however many sources
+found it (same title, fuller abstract kept), and searches never wait for the disk.
+
+By default it is a folder in your system's temporary directory (`/tmp/confoundsearch-<you>` on Linux), which the system
+clears from time to time, so nothing there is precious. To keep it, set `CONFOUNDSEARCH_CACHE=~/confoundsearch-data`
+(`confoundsearch setup` asks, and saves it in `.env`) or pass `--cache-dir`. To empty it yourself run `confoundsearch flush`
+(everything) or `confoundsearch flush --iv "..." --dv "..."` (one question). `--no-cache` skips it for one run.
 
 ## What's in this code base?
 

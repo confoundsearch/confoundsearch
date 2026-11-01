@@ -6,6 +6,7 @@ import io
 import json
 import os
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -148,6 +149,41 @@ class TestTransport:
     def test_an_unreachable_host_is_a_remote_error(self):
         with pytest.raises(RemoteError, match="could not reach"):
             urllib_transport("http://127.0.0.1:1/", {}, None, 1)
+
+    def test_a_server_that_never_answers_is_a_timeout_not_a_crash(self):
+        import socket
+
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        threading.Thread(target=lambda: (listener.accept(), time.sleep(2)), daemon=True).start()
+        try:
+            with pytest.raises(RemoteError, match="timed out waiting for"):
+                urllib_transport(f"http://127.0.0.1:{listener.getsockname()[1]}/", {}, None, 0.3)
+        finally:
+            listener.close()
+
+    def test_a_connection_dropped_half_way_is_a_remote_error(self):
+        import socket
+
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+
+        def hang_up():
+            connection, _ = listener.accept()
+            connection.recv(1024)
+            connection.sendall(
+                b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nshort"
+            )  # promises 100, sends 5
+            connection.close()
+
+        threading.Thread(target=hang_up, daemon=True).start()
+        try:
+            with pytest.raises(RemoteError, match=r"connection to .* failed"):
+                urllib_transport(f"http://127.0.0.1:{listener.getsockname()[1]}/", {}, None, 5)
+        finally:
+            listener.close()
 
     def test_a_good_answer_is_returned(self):
         server = Server(200, body=b"fine")
@@ -446,6 +482,12 @@ class TestStatusLine:
 
     def test_a_failed_source_is_mentioned(self):
         assert "openalex failed" in cli.status_text(self.asked("source_failed", source="openalex"))
+        resting = cli.status_text(self.asked("source_skipped", source="openalex", retry_in=20.0))
+        assert "openalex is resting" in resting and "again in 20s" in resting
+        assert (
+            cli.status_text(self.asked("source_recovered", source="openalex"))
+            == "openalex is answering again"
+        )
 
     def test_on_a_terminal_one_line_is_rewritten_with_the_activity_step_and_score(self):
         out, clock = Tty(), Clock()

@@ -28,7 +28,8 @@ initiative: it spends the user's money.
      server. The model name always goes in `--model`;
    - papers: by default the hosted index, which needs `ES_URL` and `ES_API_KEY`. Alternatives are
      `--corpus semanticscholar` (a free key in `S2_KEY` lifts the rate limit), `--corpus openalex`, or
-     `--corpus-file passages.jsonl`. With no `--corpus`, every source that is set up is searched and merged.
+     `--corpus-file passages.jsonl`. To try the tool with no search at all, `confoundsearch demo` (or `--corpus demo`) uses a few hundred papers
+     shipped with the package, about organizational structure and firm performance. With no `--corpus`, every source that is set up is searched and merged.
    Variables can live in a `.env` file in the working directory.
 3. If something is missing, tell the user exactly which variable to set in `.env` and stop.
    **Never ask the user to paste a key into the chat, and never echo one.**
@@ -50,8 +51,11 @@ confoundsearch run --json --model gpt-4.1 \
 ```
 
 Standard output is a single JSON document and nothing else; progress and errors go to standard error. Add
-`--confounds N` to look for more or fewer confounds (default 8). The default plan has no randomness: the same answers
-from the model give the same run (a hosted model may still answer differently). The run also writes
+`--confounds N` to look for more or fewer confounds (default 8), and `--max-budget USD` to stop once the language model has cost about
+that much (an estimate from the tokens used; a run usually costs under $1). The default plan has no randomness: the same answers
+from the model give the same run (a hosted model may still answer differently). Searches are saved in a data directory (the system's temporary folder, or `$CONFOUNDSEARCH_CACHE`), so a repeated search is
+answered from disk (one database per independent/dependent variable pair); `confoundsearch flush` empties that folder
+(`--iv`/`--dv` for one question) and `--no-cache` skips it. The run also writes
 the standalone page named by `--out`, the audit trail next to it as `confoundsearch-result.audit.jsonl`, and a log
 as `confoundsearch-result.log.jsonl` (`--log PATH`): every search request with its status, every step, and any error.
 
@@ -60,6 +64,8 @@ as `confoundsearch-result.log.jsonl` (`--log PATH`): every search request with i
 Top-level fields: `question`, `ended`, `steps`, `score`, `confounds`, `model_calls`, `models`, `files`, `audit`.
 
 If the run stopped early the JSON also has an `error` string, the exit status is 1, and what was found so far is kept.
+If it stopped because the `--max-budget` was reached, the JSON has a `stopped` string instead, the exit status is 0, and
+what was found so far is kept.
 
 Each item of `confounds` has: `label`, `phrasings`, `linked_to_both_variables`, `supported_on_both_links`,
 `evidence_to_iv`, `evidence_to_dv`, `rejected_passages`. Each passage in the evidence lists has `id`, `title`,

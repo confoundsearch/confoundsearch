@@ -15,7 +15,8 @@ TEXT = (ROOT / "justfile").read_text(encoding="utf-8")
 RECIPES = {
     "default", "setup", "fmt", "lint", "test", "check", "live",
     "env", "hooks", "release", "version", "clean", "build", "verify", "preflight", "testpypi", "publish",
-    "tag", "verify-published", "keywords", "neighbors", "rebuild", "public", "public-preview",
+    "tag", "verify-published", "keywords", "neighbors", "rebuild", "proxy-build", "check-domain",
+    "public", "public-preview",
 }  # fmt: skip
 needs_just = pytest.mark.skipif(shutil.which("just") is None, reason="just is not installed")
 

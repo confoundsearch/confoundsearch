@@ -43,9 +43,15 @@ def test_readme_stays_within_one_page():
     assert len(lines) <= 82, f"README is {len(lines)} lines; keep it to one page"
 
 
-def test_readme_has_a_quick_start_the_code_base_and_the_other_directories():
+def test_readme_has_the_expected_sections():
     headings = re.findall(r"^## (.*)$", README.read_text(encoding="utf-8"), re.M)
-    assert headings == ["Quick start", "What's in this code base?", "Other key directories"]
+    assert headings == [
+        "Quick start",
+        "Keys",
+        "Data directory",
+        "What's in this code base?",
+        "Other key directories",
+    ]
 
 
 def test_readme_states_what_it_is_up_front():
@@ -80,7 +86,7 @@ def test_the_package_page_is_minimal_and_has_no_links_that_would_break_on_pypi()
 
 
 def test_the_quick_start_commands_are_real():
-    """The README quick start is the appendix figure: setup, install-skill, run --out, review --in."""
+    """The README quick start is the appendix figure: setup, demo, install-skill, run --out, review --in."""
     from confoundsearch.interface import cli
 
     text = README.read_text(encoding="utf-8")
@@ -92,13 +98,13 @@ def test_the_quick_start_commands_are_real():
         for command in commands
         if command.startswith("confoundsearch ")
     ]
-    assert [a.command for a in seen] == ["setup", "install-skill", "run", "review"]
-    run, review = seen[2], seen[3]
+    assert [a.command for a in seen] == ["setup", "demo", "install-skill", "run", "review"]
+    run, review = seen[3], seen[4]
     assert (
         str(run.out) == "results/org.html" and str(review.input) == "results/org.html"
     )  # review pulls in run's output
     assert (run.iv, run.dv) == ("Organizational structure", "Firm performance")
-    assert '/confoundsearch iv="Organizational structure" dv="Firm performance"' in text  # step 4A
+    assert '/confoundsearch iv="Organizational structure" dv="Firm performance"' in text  # step 5A
     assert {"confoundsearch", "confoundsearchui"} <= set(cli.SKILLS)
 
 

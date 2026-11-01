@@ -94,8 +94,11 @@ def test_a_phrase_that_is_not_a_keyword_is_embedded_then_searched():
 
 
 def test_without_an_embedder_a_non_keyword_is_an_error():
-    with pytest.raises(VectorStoreError, match="no keyword named 'a small plasma device'"):
+    from confoundsearch import KeywordNotFound
+
+    with pytest.raises(KeywordNotFound, match="no keyword named 'a small plasma device'") as info:
         KeywordIndex(store()).query("a small plasma device")
+    assert isinstance(info.value, VectorStoreError)  # callers that catch the general error still do
 
 
 def echo_store():

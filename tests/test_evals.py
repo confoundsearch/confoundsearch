@@ -12,33 +12,47 @@ PILOT = EVALS / "relevance"
 LEXICAL = EVALS / "lexical"
 
 
-def run_kappa() -> list[str]:
+def run_iaa() -> list[str]:
     done = subprocess.run(
-        [sys.executable, "kappa.py"], cwd=PILOT, capture_output=True, text=True, check=True
-    )  # it reads passage_annotation.jsonl from the folder it is run in
+        [sys.executable, "iaa.py"], cwd=PILOT, capture_output=True, text=True, check=True
+    )  # it reads passage_sentence_ratings.jsonl from the folder it is run in
     return done.stdout.splitlines()
 
 
-def test_the_script_gives_the_pilots_agreement_numbers():
-    assert run_kappa() == [
-        "passage-level kappa: 0.48",
-        "p(same sentence): 65%",
-        "mean sentences/passage: 10.0",
-        "sentence-level kappa: 0.61",
+def test_the_script_gives_the_appendix_tables_of_agreement():
+    """Table 1 (passage level) and Table 2 (sentence level); a star marks fewer than 10 items."""
+    assert run_iaa() == [
+        "Passage-level kappa:",
+        "  rater_1 vs rater_2: 0.36 (n=50)",
+        "  rater_1 vs rater_3: 0.33 (n=103)",
+        "  rater_2 vs rater_3: 0.14* (n=6)",
+        "",
+        "Sentence-level kappa (both said supports):",
+        "  rater_1 vs rater_2: 0.61 (n=18)",
+        "  rater_1 vs rater_3: 0.67 (n=32)",
+        "  rater_2 vs rater_3: 0.61* (n=3)",
+        "",
+        "Same sentence, all pairs: 37/53 = 70%",
+        "Mean sentences per passage, those pairs: 7.4",
     ]
 
 
-def test_the_annotations_are_well_formed():
-    rows = [json.loads(line) for line in (PILOT / "passage_annotation.jsonl").read_text().splitlines()]
-    assert len(rows) == 31 and len({r["item_id"] for r in rows}) == 31
+def test_the_ratings_are_well_formed():
+    rows = [json.loads(line) for line in (PILOT / "passage_sentence_ratings.jsonl").read_text().splitlines()]
+    assert len(rows) == 147 and len({r["item_id"] for r in rows}) == 147
     verdicts = {"supports", "contradicts", "no_bearing"}
+    raters = ("rater_1", "rater_2", "rater_3")
+    counts = {2: 0, 3: 0}
     for row in rows:
-        assert {row["rater_1"], row["rater_2"]} <= verdicts and row["n_sentences"] > 0
-        for rater, sentence in (("rater_1", "sentence_1"), ("rater_2", "sentence_2")):
-            picked = row[sentence]
-            # a rater picks a sentence exactly when they say the passage supports the claim, and it exists
-            assert (picked is not None) == (row[rater] == "supports")
-            assert picked is None or 0 <= picked < row["n_sentences"]
+        assert row["n_sentences"] > 0
+        given = [r for r in raters if row[f"{r}_q1"] is not None]
+        counts[len(given)] += 1  # each item was annotated exactly twice, six of them a third time
+        for rater in raters:
+            verdict, sentence = row[f"{rater}_q1"], row[f"{rater}_q2"]
+            assert verdict is None or verdict in verdicts
+            # a rater who gave no answer gave no sentence, and one who found no bearing picked none
+            assert (sentence is None) == (verdict in (None, "no_bearing"))
+    assert counts == {2: 141, 3: 6}
 
 
 def run_lexical() -> list[str]:

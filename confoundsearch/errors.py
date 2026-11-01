@@ -7,6 +7,10 @@ class InvalidAction(ValueError):
     """An edit or action violates a graph invariant or the MDP's rules."""
 
 
+class BudgetReached(RuntimeError):
+    """The money the user allowed for the language model has been spent; the run stops here."""
+
+
 class RemoteError(RuntimeError):
     """A remote HTTP service failed or returned something unusable."""
 

@@ -49,10 +49,37 @@ git -C "$dest" rev-parse -q --verify HEAD > /dev/null || git -C "$dest" checkout
 
 bash "$here/sync_anonymous.sh" "$dest" > /dev/null
 
+# How many files $ref has once the left-out ones are removed: what the remote should hold.
+left_out="${EXCLUDE-examples}"
+expected="$(git ls-tree -r --name-only "$ref" | awk -v skip="$left_out" '
+  BEGIN { n = split(skip, s, " ") }
+  { for (i = 1; i <= n; i++) if ($0 == s[i] || index($0, s[i] "/") == 1) next; print }' | wc -l | tr -d ' ')"
+
 cd "$dest"
 git add -A
+count="$(git ls-files | wc -l | tr -d ' ')"
+
+# Confirm that what is on the remote is exactly what was copied from $ref: clone it again from scratch and
+# compare the whole tree (every file and its content), not only what is new.
+verify() {
+  local check want got
+  check="$(mktemp -d)"
+  git clone -q "$remote" "$check/repo" 2> /dev/null || { echo "could not clone $remote again to check it" >&2; rm -rf "$check"; exit 1; }
+  want="$(git write-tree)"
+  got="$(git -C "$check/repo" rev-parse 'HEAD^{tree}')"
+  rm -rf "$check"
+  [ "$count" = "$expected" ] || { echo "NOT verified: $ref has $expected files to publish but $count were copied" >&2; exit 1; }
+  if [ "$want" = "$got" ]; then
+    echo "Verified: the repository on the remote has all $count files, identical to $ref${left_out:+ (without: $left_out)}."
+  else
+    echo "NOT verified: the remote differs from what was copied from $ref. Run it again; if it persists, look at the remote." >&2
+    exit 1
+  fi
+}
+
 if git diff --cached --quiet; then
   echo "Nothing new to publish: $dest already matches."
+  verify
   exit 0
 fi
 git diff --cached --stat | tail -n 15
@@ -61,5 +88,6 @@ if [ -z "${ASSUME_YES:-}" ]; then
   [ "$answer" = y ] || [ "$answer" = Y ] || { echo "Not pushed. The files are copied and staged in $dest." >&2; exit 1; }
 fi
 git -c user.name=Anonymous -c user.email=anonymous@example.com -c commit.gpgsign=false commit -q -m "Update"
-git push -u origin HEAD
+git push -q -u origin HEAD
 echo "Published."
+verify

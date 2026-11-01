@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from confoundsearch.data.cache import CachedCorpus
 from confoundsearch.data.corpus import InMemoryCorpus
 from confoundsearch.data.es import ElasticsearchCorpus
 from confoundsearch.data.multi import MultiCorpus
@@ -105,8 +106,9 @@ def test_build_backend_with_elasticsearch():
         "key",
     )
     env = cli.build_backend(args).env
-    assert isinstance(env.corpus, ElasticsearchCorpus)
-    assert (env.corpus.url, env.corpus.index, env.corpus.api_key) == ("https://es.example", "docs", "key")
+    store = env.corpus.corpus  # the source, inside its saved-searches wrapper
+    assert isinstance(store, ElasticsearchCorpus)
+    assert (store.url, store.index, store.api_key) == ("https://es.example", "docs", "key")
 
 
 class ScriptedClient:
@@ -299,17 +301,74 @@ class TestAudit:
 
 class TestSources:
     def backend(self, monkeypatch, *argv, **env):
-        for name in ("ES_URL", "ES_API_KEY", "S2_KEY", "OPENALEX_API_KEY", "OPENALEX_EMAIL"):
+        for name in (
+            "ES_URL",
+            "ES_API_KEY",
+            "S2_KEY",
+            "OPENALEX_API_KEY",
+            "OPENALEX_EMAIL",
+            "CONFOUNDSEARCH_API",
+        ):
             monkeypatch.delenv(name, raising=False)
         for name, value in env.items():
             monkeypatch.setenv(name, value)
-        return cli.build_backend(parse("serve", *COMMON, *argv)).env.corpus
+        corpus = cli.build_backend(parse("serve", *COMMON, *argv)).env.corpus
+        return corpus.corpus if isinstance(corpus, CachedCorpus) else corpus  # the source inside its wrapper
 
     def test_the_default_searches_every_source_that_is_set_up(self, monkeypatch):
         corpus = self.backend(monkeypatch, ES_URL="https://hosted.example:443", ES_API_KEY="k")
         assert isinstance(corpus, MultiCorpus)
         assert list(corpus.stores) == ["elasticsearch", "semanticscholar", "openalex"]
-        assert corpus.stores["elasticsearch"].index == "papers"
+        assert corpus.stores["elasticsearch"].corpus.index == "papers"
+
+    def test_the_default_includes_the_keyword_service_when_its_address_is_set(self, monkeypatch):
+        from confoundsearch import HttpCorpus
+
+        corpus = self.backend(monkeypatch, CONFOUNDSEARCH_API="https://api.example.test")
+        assert list(corpus.stores) == ["service", "semanticscholar", "openalex"]
+        assert isinstance(corpus.stores["service"].corpus, HttpCorpus)  # inside the search cache
+        assert corpus.stores["service"].corpus.store.base_url == "https://api.example.test"
+        by_flag = self.backend(monkeypatch, "--api", "https://flag.example.test", ES_URL="https://es.example")
+        assert list(by_flag.stores) == ["service", "elasticsearch", "semanticscholar", "openalex"]
+
+    def test_a_built_in_address_is_used_when_nothing_is_set(self, monkeypatch):
+        from confoundsearch import HttpCorpus
+        from confoundsearch.data import keyword_service
+
+        monkeypatch.setattr(keyword_service, "DEFAULT_SERVICE_URL", "https://built-in.example.test")
+        corpus = self.backend(monkeypatch)
+        assert list(corpus.stores) == ["service", "semanticscholar", "openalex"]
+        assert corpus.stores["service"].corpus.store.base_url == "https://built-in.example.test"
+        assert isinstance(corpus.stores["service"].corpus, HttpCorpus)
+        # a setting wins over the built-in address, and the environment wins too
+        by_flag = self.backend(monkeypatch, "--api", "https://flag.example.test")
+        assert by_flag.stores["service"].corpus.store.base_url == "https://flag.example.test"
+        by_env = self.backend(monkeypatch, CONFOUNDSEARCH_API="https://env.example.test")
+        assert by_env.stores["service"].corpus.store.base_url == "https://env.example.test"
+
+    @pytest.mark.parametrize("off", ["off", "OFF", "none", "no", "false", "0", ""])
+    def test_the_service_can_be_switched_off(self, monkeypatch, off):
+        from confoundsearch.data import keyword_service
+
+        monkeypatch.setattr(keyword_service, "DEFAULT_SERVICE_URL", "https://built-in.example.test")
+        assert list(self.backend(monkeypatch, "--api", off).stores) == ["semanticscholar", "openalex"]
+        assert list(self.backend(monkeypatch, CONFOUNDSEARCH_API=off).stores) == [
+            "semanticscholar",
+            "openalex",
+        ]
+        with pytest.raises(SystemExit, match="no address"):
+            self.backend(monkeypatch, "--corpus", "service", "--api", off)
+
+    def test_the_service_alone_is_a_corpus_by_itself(self, monkeypatch):
+        from confoundsearch import HttpCorpus
+
+        corpus = self.backend(monkeypatch, "--corpus", "service", "--api", "https://api.example.test")
+        assert isinstance(corpus, HttpCorpus)
+
+    def test_the_service_needs_its_address(self, monkeypatch):
+        with pytest.raises(SystemExit) as exit_info:
+            self.backend(monkeypatch, "--corpus", "service")
+        assert "--api URL" in str(exit_info.value) and "CONFOUNDSEARCH_API" in str(exit_info.value)
 
     def test_without_a_hosted_index_the_default_is_the_two_open_sources(self, monkeypatch):
         corpus = self.backend(monkeypatch)
@@ -392,7 +451,7 @@ class TestSources:
         monkeypatch.setattr(cli, "build_backend", spy)
         monkeypatch.setattr(cli, "make_server", lambda *a: Server())
         cli.main(["serve", *COMMON])
-        assert seen[0].stores["elasticsearch"].url == "https://from-dotenv.example"
+        assert seen[0].stores["elasticsearch"].corpus.url == "https://from-dotenv.example"
 
 
 class TestJsonAndSkill:
@@ -563,8 +622,9 @@ class TestProgress:
 
 
 class TestSetup:
-    def answers(self, monkeypatch, choice, *keys):
-        monkeypatch.setattr("builtins.input", lambda prompt="": choice)
+    def answers(self, monkeypatch, choice, *keys, folder=""):
+        replies = iter([choice, folder])  # the model, then the data directory
+        monkeypatch.setattr("builtins.input", lambda prompt="": next(replies))
         given = iter(keys)
         monkeypatch.setattr(cli.getpass, "getpass", lambda prompt="": next(given))
 
@@ -577,6 +637,28 @@ class TestSetup:
         shown = capsys.readouterr()
         assert "secret" not in shown.out + shown.err
         assert "OPENAI_API_KEY, S2_KEY" in shown.out
+
+    def test_it_tells_you_where_downloads_go_and_how_to_empty_them(self, tmp_path, monkeypatch, capsys):
+        self.answers(monkeypatch, "2", "k", "")
+        assert cli.main(["setup", "--env-file", str(tmp_path / ".env")]) == 0
+        said = " ".join(capsys.readouterr().out.split())  # the message wraps over lines
+        assert "downloads papers" in said and "Hugging Face's model folder" in said
+        assert (
+            "confoundsearch flush" in said and str(cli.cache_dir()) in said and "temporary directory" in said
+        )
+
+    def test_a_data_directory_you_choose_is_saved_in_full(self, tmp_path, monkeypatch):
+        env_file = tmp_path / ".env"
+        self.answers(monkeypatch, "2", "k", "", folder="~/confoundsearch-data")
+        assert cli.main(["setup", "--env-file", str(env_file)]) == 0
+        saved = Path.home() / "confoundsearch-data"
+        assert env_file.read_text() == f"OPENAI_API_KEY=k\nCONFOUNDSEARCH_CACHE={saved}\n"
+
+    def test_enter_leaves_the_data_directory_alone(self, tmp_path, monkeypatch):
+        env_file = tmp_path / ".env"
+        self.answers(monkeypatch, "2", "k", "")
+        assert cli.main(["setup", "--env-file", str(env_file)]) == 0
+        assert "CONFOUNDSEARCH_CACHE" not in env_file.read_text()
 
     def test_the_default_is_openrouter_and_the_semantic_scholar_key_is_optional(self, tmp_path, monkeypatch):
         self.answers(monkeypatch, "", "sk-or-secret", "")

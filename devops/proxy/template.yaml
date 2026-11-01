@@ -1,0 +1,238 @@
+# The keyword proxy: API Gateway (HTTP API) -> one Lambda -> Pinecone (keywords) and Elasticsearch (papers). Callers embed their own phrases with their own
+# OpenAI key, so the service holds no OpenAI key. Deploy with the AWS SAM CLI after `just proxy-build`; see README.md.
+# Nothing secret is in this file: the Pinecone key is read by the function from AWS Systems Manager, where you put it.
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Read-only keyword search over a Pinecone index, with throttling and spend limits.
+
+Parameters:
+  CodeBucket:
+    Type: String
+    MinLength: 3
+    MaxLength: 63
+    AllowedPattern: "[a-z0-9][a-z0-9.-]*[a-z0-9]"
+    ConstraintDescription: An S3 bucket name (3 to 63 lowercase letters, digits, dots or hyphens). It must not be empty.
+    Description: An S3 bucket, in the same region as this stack, holding the zip made by `just proxy-build`.
+  CodeKey:
+    Type: String
+    MinLength: 5
+    AllowedPattern: ".+[.]zip"
+    ConstraintDescription: The file name of the zip in the bucket, ending in .zip (for example lambda.zip). It must not be empty.
+    Description: The zip's file name in that bucket. Give a new name for each new version of the code; the function only updates when the name changes.
+  PineconeKeyParameter:
+    Type: String
+    Default: /keywords/pinecone-read-key
+    Description: Name of the SecureString parameter that holds a READ-ONLY Pinecone API key.
+  ElasticUrl:
+    Type: String
+    Default: ""
+    Description: The Elasticsearch endpoint, for paper search. Empty switches paper search off.
+  ElasticKeyParameter:
+    Type: String
+    Default: /keywords/elastic-read-key
+    Description: Name of the SecureString parameter that holds a READ-ONLY Elasticsearch API key (limited to the papers index).
+  ElasticIndex:
+    Type: String
+    Default: papers
+  PineconeIndex:
+    Type: String
+    Default: keywords
+  PineconeHost:
+    Type: String
+    Default: ""
+    Description: The index host (from the Pinecone console), without https://. Saves a lookup on every cold start.
+  EmbedModel:
+    Type: String
+    Default: text-embedding-3-small
+  EmbedDims:
+    Type: Number
+    Default: 512
+  KeywordCount:
+    Type: String
+    Default: ""
+    Description: Shown in the manifest. Optional.
+  LocalCopyUrl:
+    Type: String
+    Default: ""
+    Description: Where a downloadable copy of the vectors lives, shown in the manifest. Optional.
+  RateLimit:
+    Type: Number
+    Default: 5
+    Description: Steady requests per second the whole API accepts. API Gateway answers 429 above it.
+  BurstLimit:
+    Type: Number
+    Default: 10
+    Description: Short bursts above the steady rate.
+  MaxConcurrency:
+    Type: Number
+    Default: 5
+    Description: At most this many copies of the function run at once, a hard cap on cost.
+  DomainName:
+    Type: String
+    Default: ""
+    Description: A domain name you own, for the permanent address (for example confoundsearch.org). Empty uses the address API Gateway generates.
+  HostedZoneId:
+    Type: String
+    Default: ""
+    AllowedPattern: "(Z[A-Z0-9]+)?"
+    ConstraintDescription: A Route 53 hosted zone ID such as Z0123456789ABC, or empty.
+    Description: The Route 53 hosted zone of that domain. If given, the DNS record is made for you and, with no CertificateArn, so is the certificate (validated by DNS automatically).
+  CertificateArn:
+    Type: String
+    Default: ""
+    Description: An ACM certificate for DomainName in THIS region, already validated. Needed only if the domain's DNS is not in Route 53.
+  DisableDefaultAddress:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Set to true, once the domain works, to close the generated execute-api address so that the domain is the only way in. Ignored if there is no DomainName.
+  AlertEmail:
+    Type: String
+    Default: ""
+    Description: Where to send a warning when the month's AWS cost passes the budget. Empty skips the alert.
+  MonthlyBudgetUsd:
+    Type: Number
+    Default: 10
+
+Conditions:
+  HasElastic: !Not [!Equals [!Ref ElasticUrl, ""]]
+  HasAlertEmail: !Not [!Equals [!Ref AlertEmail, ""]]
+  HasDomain: !Not [!Equals [!Ref DomainName, ""]]
+  HasZone: !Not [!Equals [!Ref HostedZoneId, ""]]
+  HasCertificateArn: !Not [!Equals [!Ref CertificateArn, ""]]
+  MakeDnsRecord: !And [!Condition HasDomain, !Condition HasZone]
+  CloseDefaultAddress: !And [!Condition HasDomain, !Equals [!Ref DisableDefaultAddress, "true"]]
+  MakeCertificate: !And [!Condition HasDomain, !Condition HasZone, !Not [!Condition HasCertificateArn]]
+
+Resources:
+  Api:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      DefaultRouteSettings:
+        ThrottlingRateLimit: !Ref RateLimit
+        ThrottlingBurstLimit: !Ref BurstLimit
+      DisableExecuteApiEndpoint: !If [CloseDefaultAddress, true, false]  # never with no domain: it would close the only way in
+
+  Function:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handler.lambda_handler
+      Runtime: python3.12
+      CodeUri:
+        Bucket: !Ref CodeBucket
+        Key: !Ref CodeKey
+      MemorySize: 256
+      Timeout: 20
+      ReservedConcurrentExecutions: !Ref MaxConcurrency
+      Environment:
+        Variables:
+          PINECONE_KEY_PARAMETER: !Ref PineconeKeyParameter
+          PINECONE_INDEX: !Ref PineconeIndex
+          ELASTIC_URL: !Ref ElasticUrl
+          ELASTIC_KEY_PARAMETER: !Ref ElasticKeyParameter
+          ELASTIC_INDEX: !Ref ElasticIndex
+          PINECONE_HOST: !Ref PineconeHost
+          EMBED_MODEL: !Ref EmbedModel
+          EMBED_DIMS: !Ref EmbedDims
+          KEYWORD_COUNT: !Ref KeywordCount
+          LOCAL_COPY_URL: !Ref LocalCopyUrl
+          MAX_K: "100"
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource:
+                - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${PineconeKeyParameter}"
+                - !If
+                  - HasElastic
+                  - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ElasticKeyParameter}"
+                  - !Ref AWS::NoValue
+      Events:
+        Health:
+          Type: HttpApi
+          Properties: { ApiId: !Ref Api, Path: /v1/health, Method: GET }
+        Manifest:
+          Type: HttpApi
+          Properties: { ApiId: !Ref Api, Path: /v1/manifest, Method: GET }
+        Neighbors:
+          Type: HttpApi
+          Properties: { ApiId: !Ref Api, Path: /v1/neighbors, Method: POST }
+        Papers:
+          Type: HttpApi
+          Properties: { ApiId: !Ref Api, Path: /v1/papers, Method: POST }
+        Fetch:
+          Type: HttpApi
+          Properties: { ApiId: !Ref Api, Path: /v1/fetch, Method: POST }
+        Query:
+          Type: HttpApi
+          Properties: { ApiId: !Ref Api, Path: /v1/query, Method: POST }
+
+  Certificate:
+    Type: AWS::CertificateManager::Certificate
+    Condition: MakeCertificate
+    Properties:
+      DomainName: !Ref DomainName
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: !Ref DomainName
+          HostedZoneId: !Ref HostedZoneId
+
+  CustomDomain:
+    Type: AWS::ApiGatewayV2::DomainName
+    Condition: HasDomain
+    Properties:
+      DomainName: !Ref DomainName
+      DomainNameConfigurations:
+        - EndpointType: REGIONAL
+          SecurityPolicy: TLS_1_2
+          CertificateArn: !If [HasCertificateArn, !Ref CertificateArn, !Ref Certificate]
+
+  CustomDomainMapping:
+    Type: AWS::ApiGatewayV2::ApiMapping
+    Condition: HasDomain
+    DependsOn: ApiApiGatewayDefaultStage
+    Properties:
+      ApiId: !Ref Api
+      DomainName: !Ref CustomDomain
+      Stage: $default
+
+  DnsRecord:
+    Type: AWS::Route53::RecordSet
+    Condition: MakeDnsRecord
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref DomainName
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt CustomDomain.RegionalDomainName
+        HostedZoneId: !GetAtt CustomDomain.RegionalHostedZoneId
+
+  Budget:
+    Type: AWS::Budgets::Budget
+    Condition: HasAlertEmail
+    Properties:
+      Budget:
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit: { Amount: !Ref MonthlyBudgetUsd, Unit: USD }
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 80
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - { SubscriptionType: EMAIL, Address: !Ref AlertEmail }
+
+Outputs:
+  PermanentUrl:
+    Condition: HasDomain
+    Description: The address to put in the package (DEFAULT_SERVICE_URL). It stays the same even if this stack is rebuilt.
+    Value: !Sub "https://${DomainName}"
+  DnsTarget:
+    Condition: HasDomain
+    Description: If the domain's DNS is NOT in Route 53, point the name at this one (a CNAME, or your DNS host's ALIAS/ANAME record if the name is a bare domain).
+    Value: !GetAtt CustomDomain.RegionalDomainName
+  ApiUrl:
+    Description: The generated address. Stable only for as long as this stack lives; prefer PermanentUrl.
+    Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com"

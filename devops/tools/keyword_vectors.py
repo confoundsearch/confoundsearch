@@ -35,15 +35,16 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Dict
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from confoundsearch.data.keyword_index import KeywordIndex, pool_size, without_echoes  # noqa: E402
+from confoundsearch.data.keyword_service import KeywordService  # noqa: E402
 from confoundsearch.data.vectors import (  # noqa: E402
     PineconeVectorStore,
     VectorRecord,
@@ -52,6 +53,7 @@ from confoundsearch.data.vectors import (  # noqa: E402
 )
 from confoundsearch.dotenv import load_dotenv  # noqa: E402
 from confoundsearch.errors import VectorStoreError  # noqa: E402
+from confoundsearch.model.embeddings import OpenAIEmbedder  # noqa: E402
 
 SNAPSHOT = "https://openalex.s3.amazonaws.com"
 EMBEDDINGS = "https://api.openai.com/v1/embeddings"
@@ -66,7 +68,7 @@ MAX_ALTERNATIVES = 6
 MAX_CHARS = 1000  # a text is cut here: no keyword needs more, and the API rejects very long inputs
 RETRY_STATUS = {429, 500, 502, 503, 504}
 
-Post = Callable[[str, dict[str, str], bytes], bytes]
+Post = Callable[[str, Dict[str, str], bytes], bytes]
 
 
 def log(message: str) -> None:
@@ -473,6 +475,10 @@ def main(argv: list[str] | None = None) -> int:
             sub.add_argument("--namespace", default="")
             sub.add_argument("--cloud", default="aws")
             sub.add_argument("--region", default="us-east-1")
+        if name == "query":
+            sub.add_argument(
+                "--api", help="ask the keyword service at this address instead of Pinecone directly"
+            )
         if name in ("query", "neighbors"):
             sub.add_argument(
                 "--distinct",
@@ -561,6 +567,18 @@ def main(argv: list[str] | None = None) -> int:
                 f"Pinecone said: {err}"
             ) from err
         print(json.dumps(result, indent=2))
+        return 0
+    if args.command == "query" and args.api:
+        # The service looks a keyword up for free; any other phrase is embedded here, with your own key.
+        own_embedder = OpenAIEmbedder(key, args.model, args.dims) if key else None
+        try:
+            found = KeywordService(args.api, own_embedder).query(
+                args.phrase, args.k, args.min_works, distinct=args.distinct
+            )
+        except VectorStoreError as err:
+            raise SystemExit(f"error: {err}") from err
+        for match in found:
+            print(f"{match.score:.3f}  {match.metadata.get('name')}  ({match.metadata.get('works')} papers)")
         return 0
     if args.command == "query" and args.index:
         # A name that is a keyword is looked up in the index and needs no OpenAI key; any other phrase does.

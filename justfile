@@ -34,7 +34,7 @@ fmt:
 lint:
     ruff check .
     ruff format --check .
-    mypy confoundsearch devops/tools examples
+    mypy confoundsearch devops/tools devops/proxy examples
 
 # Run the tests, with the 100% branch-coverage gate. Extra arguments go to pytest.
 test *args:
@@ -83,6 +83,14 @@ keywords index="" limit="":
 rebuild index:
     {{py}} devops/tools/keyword_vectors.py build --out keyword_vectors
     {{py}} devops/tools/keyword_vectors.py push --out keyword_vectors --index {{index}} --fresh --yes
+
+# Does the domain name you own identify you, is its DNS in Route 53, and does the service answer on it? Needs the internet.
+check-domain domain host="":
+    {{py}} devops/proxy/check_domain.py {{domain}} {{ if host != "" { "--host " + host } else { "" } }}
+
+# Build the zip for the keyword proxy (devops/proxy/README.md says how to deploy it).
+proxy-build:
+    {{py}} devops/proxy/build.py
 
 # The nearest keywords to each construct in the known-confounds file, from the Pinecone index (needs OPENAI_API_KEY and
 # PINECONE_API_KEY). Writes keyword_neighbors.md. Add `--min-works 500` etc. as extra arguments.

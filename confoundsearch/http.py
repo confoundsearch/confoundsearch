@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import http.client
+import socket
 import time
 import urllib.error
 import urllib.request
@@ -37,6 +39,13 @@ def urllib_transport(url: str, headers: Mapping[str, str], body: bytes | None, t
         raise HttpError(f"HTTP {err.code} from {url}: {detail}", err.code, retry_after) from err
     except urllib.error.URLError as err:
         raise RemoteError(f"could not reach {url}: {err.reason}") from err
+    except (
+        socket.timeout,
+        TimeoutError,
+    ) as err:  # a server that accepts the request and never finishes answering
+        raise RemoteError(f"timed out waiting for {url}") from err
+    except (OSError, http.client.HTTPException) as err:  # a connection that drops half way
+        raise RemoteError(f"the connection to {url} failed: {type(err).__name__}: {err}") from err
 
 
 def resilient(
