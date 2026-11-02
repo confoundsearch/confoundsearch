@@ -56,23 +56,23 @@ A run usually costs well under $1 in model fees. Runs really cost a few cents if
 ## Data directory
 
 As it searches, ConfoundSearch downloads papers and saves them, and the language model's answers, in a *data directory*, a folder on your computer,
-so the same search is never made twice and the same question is never paid for twice: reruns are faster, use no rate limit and return the same papers. This is a [cache](https://en.wikipedia.org/wiki/Cache_(computing)), a common
-pattern: [Transformers](https://huggingface.co/docs/transformers) keeps models in a [folder set by `HF_HOME`](https://huggingface.co/docs/hub/local-cache),
-and [pip](https://pip.pypa.io/en/stable/topics/caching/) does the same with its downloads. We use one small [SQLite](https://www.sqlite.org/about.html)
-file per question (pair of independent and dependent variable), so studies never mix, and each paper is stored once.
+so the same search is never made twice. This is a common
+pattern. For example, [Transformers](https://huggingface.co/docs/transformers) keeps models in a [folder set by `HF_HOME`](https://huggingface.co/docs/hub/local-cache). We use one small [SQLite](https://www.sqlite.org/about.html)
+file per question (pair of independent and dependent variable).
 
-**Where.** By default in your [temporary folder](https://en.wikipedia.org/wiki/Temporary_folder) (`/tmp/confoundsearch-<you>` on Linux), which your
-computer clears from time to time (Mac and Linux: after a restart or a few days; Windows: only if its automatic clean-up is on). This directory can get flushed.
+**Default location.** By default the data directory lives in your [temporary folder](https://en.wikipedia.org/wiki/Temporary_folder) (`/tmp/confoundsearch-<you>` on Linux), which your
+computer clears from time to time (Mac and Linux: after a restart or a few days; Windows: only if its automatic clean-up is on). The cache can get flushed periodically and the tool will still run fine.
 
-**To keep it.** Set the [environment variable](https://en.wikipedia.org/wiki/Environment_variable) `CONFOUNDSEARCH_CACHE`, for example
+**If you want a permanent cache.** If you don't want your cache to get flushed, set the [environment variable](https://en.wikipedia.org/wiki/Environment_variable) `CONFOUNDSEARCH_CACHE`, for example
 `CONFOUNDSEARCH_CACHE=~/confoundsearch-data`. `confoundsearch setup` asks for it and saves it in `.env`; `--cache-dir` sets it for one run.
 
-**To empty it.** `confoundsearch flush` (everything) or `confoundsearch flush --iv "..." --dv "..."` (one question). `--no-cache` ignores it for one run. The example
-question starts pre-warmed: the first time you run it, its saved searches and model answers are copied here (emptying it just means they are copied again next time).
+**If you need space and want to clear your cache.** Run `confoundsearch flush` (everything) or `confoundsearch flush --iv "..." --dv "..."` (for a given input pair).
 
-**To keep a permanent record.** What matters is the result of a run, not the downloaded papers. `run` saves it where you point `--out`: the page
-(`results/org.html`) and, next to it, an audit trail (`results/org.audit.jsonl`). `confoundsearch audit results/org.audit.jsonl > report.md` checks that
-the trail is intact and prints a readable report of each confound, its supporting papers (with links) and which search found them.
+**To keep a permanent record of a search.** Use a `--out` flag to save both an HTML interface and a jsonl audit log, as shown above.
+
+# To inspect, modify, or fork ConfoundSearch 
+
+Confound search is open-source software with a permissive MIT License. This section is for programmers interested in the underlying code.
 
 ## What's in this code base?
 
