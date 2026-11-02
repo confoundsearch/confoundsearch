@@ -47,8 +47,9 @@ def test_readme_has_the_expected_sections():
     headings = re.findall(r"^## (.*)$", README.read_text(encoding="utf-8"), re.M)
     assert headings == [
         "Quick start",
-        "Keys",
+        "How to setup API keys",
         "Data directory",
+        "To inspect, modify, or fork ConfoundSearch",
         "What's in this code base?",
         "Other key directories",
     ]
@@ -90,7 +91,7 @@ def test_the_quick_start_commands_are_real():
     from confoundsearch.interface import cli
 
     text = README.read_text(encoding="utf-8")
-    section = text[text.index("## Quick start") : text.index("## Keys")]
+    section = text[text.index("## Quick start") : text.index("## How to setup API keys")]
     block = "\n".join(re.findall(r"```bash\n(.*?)```", section, re.S))  # the quick start and the full setup
     commands = [line.split("#")[0].strip() for line in block.replace("\\\n", " ").splitlines()]
     parser = cli.build_parser()

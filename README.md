@@ -18,7 +18,7 @@ confoundsearch demo               # 2. run a demo
 ```
 
 ConfoundSearch has latency and requires API keys. The demo gives you a sense of how it works before a full setup.  `confoundsearch demo` shows a full run from start to finish and opens the result, for the independent variable `organizational structure` and the dependent variable `firm performance`. 
-The demo runs runs in about a second without any setup. We recommend trying out the demo to start and then proceeding with a full setup.
+The demo runs in about a second without any setup. We recommend trying out the demo to start and then proceeding with a full setup.
 
 ### Full setup
 
@@ -69,9 +69,9 @@ computer clears from time to time (Mac and Linux: after a restart or a few days;
 
 **To keep a permanent record of a search.** Use a `--out` flag to save both an HTML interface and a jsonl audit log, as shown above.
 
-# To inspect, modify, or fork ConfoundSearch 
+## To inspect, modify, or fork ConfoundSearch
 
-Confound search is open-source software with a permissive MIT License. This section is for programmers interested in the underlying code.
+ConfoundSearch is open-source software with a permissive MIT License. This section is for programmers interested in the underlying code.
 
 ## What's in this code base?
 
