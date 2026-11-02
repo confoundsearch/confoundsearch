@@ -37,16 +37,14 @@ longer jobs in a tmux/screen session or side terminal. See the technical appendi
 
 `confoundsearch setup` asks for your API keys and saves them in a file called `.env` in the folder you run it from (if `.env` files are
 unfamiliar, [this page](https://github.com/theskumar/python-dotenv#readme) explains the idea). Your keys stay on your computer: each is sent only to
-the service it belongs to, never to us. ConfoundSearch still works if you leave some out, but you need a key for a language model unless you host an
-open-weight model yourself (most people lack the skills or hardware). Setup walks you through it, and you can edit `.env` later. From strictly
-necessary to nice to have:
+the service it belongs to, never to any other server. From strictly necessary to nice to have:
 
 | Key | The service, and where to get a key | Why |
 | --- | --- | --- |
 | `OPENROUTER_API_KEY` or `OPENAI_API_KEY`: **required** | [OpenRouter](https://openrouter.ai/keys) sells access to hundreds of models from many providers behind one key; [OpenAI](https://platform.openai.com/api-keys) is the maker of ChatGPT and sells its models the same way | The agent reads each paper's abstract and judges whether it supports a causal claim, so every run makes model calls. Any OpenAI-compatible model works (`--model`). |
-| `S2_KEY`: strongly recommended | [Semantic Scholar](https://www.semanticscholar.org/product/api) is a free academic search index run by the Allen Institute for AI; the key is free | Without one you share a rate limit with every anonymous user, searches get refused (HTTP 429) and runs slow down or stop early. |
-| `OPENALEX_API_KEY` or `OPENALEX_EMAIL`: optional | [OpenAlex](https://openalex.org/settings/api) is a free, open index of scholarly papers run by the nonprofit OurResearch; the key needs a free account | A key or an email puts you in its faster, more reliable pool. |
-| `OPENAI_API_KEY`: optional | An [OpenAI key](https://platform.openai.com/api-keys); its embedding models turn text into vectors, so similar meanings sit close together | Searching the keyword vectors for a phrase that is not already in the pre-indexed set embeds it. Set it even if the agent uses another model. |
+| `S2_KEY`: strongly recommended | [Semantic Scholar](https://www.semanticscholar.org/product/api) is a free academic search index run by the Allen Institute for AI; the key is free | Everything runs faster. Without a key you share a rate limit with every anonymous user, so searches get refused (HTTP 429) and runs slow down or stop early. |
+| `OPENALEX_API_KEY` or `OPENALEX_EMAIL`: optional | [OpenAlex](https://openalex.org/settings/api) is a free, open index of scholarly papers run by the nonprofit OurResearch; the key needs a free account | Runs faster. A key or an email puts you in OpenAlex's faster, more reliable pool, so searches finish sooner and fewer fail. |
+| `OPENAI_API_KEY`: optional | An [OpenAI key](https://platform.openai.com/api-keys); its embedding models turn text into vectors, so similar meanings sit close together | Finds related keywords by meaning (say, "head count" for "firm size"), even for a phrase ConfoundSearch has never seen: an OpenAI model turns your phrase into numbers that can be compared. Set it even if the agent uses a different model. |
 
 Not a key: the [ConfoundSearch service](https://confoundsearch.org) is on by default and searches papers and keyword vectors for
 you. Your search terms go to it; `--api off` (or `CONFOUNDSEARCH_API=off`) turns it off.
@@ -58,12 +56,11 @@ A run usually costs under $1 in model fees. `--max-budget USD` stops it at about
 As it searches, ConfoundSearch downloads papers and saves them in a *data directory*, a folder on your computer, so the same search is never made
 twice: reruns are faster, use no rate limit and return the same papers. This is a [cache](https://en.wikipedia.org/wiki/Cache_(computing)), a common
 pattern: [Transformers](https://huggingface.co/docs/transformers) keeps models in a [folder set by `HF_HOME`](https://huggingface.co/docs/hub/local-cache),
-and [pip](https://pip.pypa.io/en/stable/topics/caching/) does the same with its downloads. Here it is one small [SQLite](https://www.sqlite.org/about.html)
+and [pip](https://pip.pypa.io/en/stable/topics/caching/) does the same with its downloads. We use one small [SQLite](https://www.sqlite.org/about.html)
 file per question (pair of independent and dependent variable), so studies never mix, and each paper is stored once.
 
 **Where.** By default in your [temporary folder](https://en.wikipedia.org/wiki/Temporary_folder) (`/tmp/confoundsearch-<you>` on Linux), which your
-computer clears from time to time (Mac and Linux: after a restart or a few days; Windows: only if its automatic clean-up is on). Nothing there is
-precious: the next run just downloads again.
+computer clears from time to time (Mac and Linux: after a restart or a few days; Windows: only if its automatic clean-up is on). This directory can get flushed.
 
 **To keep it.** Set the [environment variable](https://en.wikipedia.org/wiki/Environment_variable) `CONFOUNDSEARCH_CACHE`, for example
 `CONFOUNDSEARCH_CACHE=~/confoundsearch-data`. `confoundsearch setup` asks for it and saves it in `.env`; `--cache-dir` sets it for one run.
