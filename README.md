@@ -18,8 +18,7 @@ confoundsearch demo               # 2. run a demo
 ```
 
 ConfoundSearch has latency and requires API keys. The demo gives you a sense of how it works before a full setup.  `confoundsearch demo` shows a full run from start to finish and opens the result, for the independent variable `organizational structure` and the dependent variable `firm performance`. 
-For this one query, the package ships all of the data queries and model queries already cached and ready to go. 
-This means that it runs in about a second without any setup. We recommend trying out the demo to start and then proceeding with a full setup.
+The demo runs runs in about a second without any setup. We recommend trying out the demo to start and then proceeding with a full setup.
 
 ### Full setup
 
