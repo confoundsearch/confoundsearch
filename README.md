@@ -17,27 +17,13 @@ pip install confoundsearch        # 1. install (Python 3.8+)
 confoundsearch demo               # 2. run a demo
 ```
 
-ConfoundSearch has latency and requires API keys. The demo gives you a sense of how it works before a full setup.
-
-`confoundsearch demo` runs an example question (organizational structure and firm performance) from start to finish and opens the result.
-For this one question the package ships with everything already saved: the searches and the language model's answers (a "pre-warmed"
-[data directory](#data-directory)). So it runs in about a second, costs nothing, and **works even if you have no keys at all** (without one it
-replays the recorded run). You will see a note, then a summary:
-
-```
-$ confoundsearch demo
-No language model key found, so this replays the recorded example run ...
-Note: this is the built-in example question. Its searches, and the answers of the default model (gpt-4.1-mini), are already saved ...
-69 steps, 4 connected, phi=8.317      # 4 confounds linked to both variables
-39 of 39 model calls were answered from saved replies, at no cost
-```
-
-**This is a stub:** any other question, or another model, searches and asks live, which takes longer and costs a few cents. `--offline` searches only
-the example papers that ship with the package, but asks the model live (so it needs a key).
+ConfoundSearch has latency and requires API keys. The demo gives you a sense of how it works before a full setup.  `confoundsearch demo` shows a full run from start to finish and opens the result, for the independent variable organizational structure and the dependent variable firm performance. 
+For this one query the package ships all of the data queries and model queries already cached and ready to go. 
+This means that it runs in about a second without any setup. We recommend trying out the demo to start and then proceeding with a full setup.
 
 ### Full setup
 
-When you are ready to run your own questions:
+When you are ready to run your own queries:
 
 ```bash
 confoundsearch setup              # 3. save your keys in a .env file (language model, Semantic Scholar)
@@ -53,11 +39,10 @@ confoundsearch run --model qwen/qwen3-max \
 confoundsearch review --in results/org.html     # 6. open the interface: the confounds as a causal graph
 ```
 
-## Keys
+## How to setup API keys
 
-`confoundsearch setup` asks for your API keys and saves them in a file called `.env` in the folder you run it from (if `.env` files are
-unfamiliar, [this page](https://github.com/theskumar/python-dotenv#readme) explains the idea). Your keys stay on your computer: each is sent only to
-the service it belongs to, never to any other server. From strictly necessary to nice to have:
+`confoundsearch setup` asks for API keys and saves them in a file called `.env` in the folder where you run the code (if `.env` files are
+unfamiliar, [this page](https://github.com/theskumar/python-dotenv#readme) explains the idea). Your keys stay on your computer. Some keys are necessary, others are just nice to have:
 
 | Key | The service, and where to get a key | Why |
 | --- | --- | --- |
