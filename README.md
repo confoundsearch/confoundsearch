@@ -17,7 +17,7 @@ See our submission documents for more.
 ```bash
 pip install confoundsearch        # 1. install (Python 3.8+)
 confoundsearch setup              # 2. save your keys in a .env file (language model, Semantic Scholar)
-confoundsearch demo               # 3. the happy path: a short run on papers that ship with the package, then opens it
+confoundsearch demo               # 3. try it: a short example run on the question below, then open the result
 confoundsearch install-skill      # 4. optional: add the Claude skill
 
 # A run can be slow; we are working to reduce latency. See below.
@@ -30,8 +30,22 @@ confoundsearch run --model qwen/qwen3-max \
 confoundsearch review --in results/org.html     # 6. open the interface: the confounds as a causal graph
 ```
 
-`demo` needs only a language model key (no searching), costs a few cents and takes a couple of minutes. We suggest running
-longer jobs in a tmux/screen session or side terminal. See the technical appendix for more.
+**Start with the example.** `confoundsearch demo` runs the example question above (organizational structure and firm performance) from start to
+finish and opens the result. For this one question the package ships with everything already saved: the searches and the language model's
+answers (a "pre-warmed" [data directory](#data-directory)). So it runs in about a second, costs nothing, and **works even if you have no keys at
+all**: without one it replays the recorded run. With a key it behaves the same. You will see a note, then a summary:
+
+```
+$ confoundsearch demo
+No language model key found, so this replays the recorded example run ...
+Note: this is the built-in example question. Its searches, and the answers of the default model (gpt-4.1-mini), are already saved ...
+69 steps, 4 connected, phi=8.317      # 4 confounds linked to both variables
+39 of 39 model calls were answered from saved replies, at no cost
+```
+
+**This is a stub:** any other question, or another model, searches and asks live, which takes longer and costs a few cents. `--offline` searches only
+the example papers that ship with the package, but asks the model live (so it needs a key). We suggest running longer jobs in a tmux/screen session
+or side terminal. See the technical appendix for more.
 
 ## Keys
 
@@ -41,7 +55,7 @@ the service it belongs to, never to any other server. From strictly necessary to
 
 | Key | The service, and where to get a key | Why |
 | --- | --- | --- |
-| `OPENROUTER_API_KEY` or `OPENAI_API_KEY`: **required** | [OpenRouter](https://openrouter.ai/keys) sells access to hundreds of models from many providers behind one key; [OpenAI](https://platform.openai.com/api-keys) is the maker of ChatGPT and sells its models the same way | The agent reads each paper's abstract and judges whether it supports a causal claim, so every run makes model calls. Any OpenAI-compatible model works (`--model`). |
+| `OPENROUTER_API_KEY` or `OPENAI_API_KEY`: **required** for your own questions (the example works without) | [OpenRouter](https://openrouter.ai/keys) sells access to hundreds of models from many providers behind one key; [OpenAI](https://platform.openai.com/api-keys) is the maker of ChatGPT and sells its models the same way | The agent reads each paper's abstract and judges whether it supports a causal claim, so every run makes model calls. Any OpenAI-compatible model works (`--model`). |
 | `S2_KEY`: strongly recommended | [Semantic Scholar](https://www.semanticscholar.org/product/api) is a free academic search index run by the Allen Institute for AI; the key is free | Everything runs faster. Without a key you share a rate limit with every anonymous user, so searches get refused (HTTP 429) and runs slow down or stop early. |
 | `OPENALEX_API_KEY` or `OPENALEX_EMAIL`: optional | [OpenAlex](https://openalex.org/settings/api) is a free, open index of scholarly papers run by the nonprofit OurResearch; the key needs a free account | Runs faster. A key or an email puts you in OpenAlex's faster, more reliable pool, so searches finish sooner and fewer fail. |
 | `OPENAI_API_KEY`: optional | An [OpenAI key](https://platform.openai.com/api-keys); its embedding models turn text into vectors, so similar meanings sit close together | Finds related keywords by meaning (say, "head count" for "firm size"), even for a phrase ConfoundSearch has never seen: an OpenAI model turns your phrase into numbers that can be compared. Set it even if the agent uses a different model. |
@@ -53,8 +67,8 @@ A run usually costs under $1 in model fees. `--max-budget USD` stops it at about
 
 ## Data directory
 
-As it searches, ConfoundSearch downloads papers and saves them in a *data directory*, a folder on your computer, so the same search is never made
-twice: reruns are faster, use no rate limit and return the same papers. This is a [cache](https://en.wikipedia.org/wiki/Cache_(computing)), a common
+As it searches, ConfoundSearch downloads papers and saves them, and the language model's answers, in a *data directory*, a folder on your computer,
+so the same search is never made twice and the same question is never paid for twice: reruns are faster, use no rate limit and return the same papers. This is a [cache](https://en.wikipedia.org/wiki/Cache_(computing)), a common
 pattern: [Transformers](https://huggingface.co/docs/transformers) keeps models in a [folder set by `HF_HOME`](https://huggingface.co/docs/hub/local-cache),
 and [pip](https://pip.pypa.io/en/stable/topics/caching/) does the same with its downloads. We use one small [SQLite](https://www.sqlite.org/about.html)
 file per question (pair of independent and dependent variable), so studies never mix, and each paper is stored once.
@@ -65,7 +79,8 @@ computer clears from time to time (Mac and Linux: after a restart or a few days;
 **To keep it.** Set the [environment variable](https://en.wikipedia.org/wiki/Environment_variable) `CONFOUNDSEARCH_CACHE`, for example
 `CONFOUNDSEARCH_CACHE=~/confoundsearch-data`. `confoundsearch setup` asks for it and saves it in `.env`; `--cache-dir` sets it for one run.
 
-**To empty it.** `confoundsearch flush` (everything) or `confoundsearch flush --iv "..." --dv "..."` (one question). `--no-cache` ignores it for one run.
+**To empty it.** `confoundsearch flush` (everything) or `confoundsearch flush --iv "..." --dv "..."` (one question). `--no-cache` ignores it for one run. The example
+question starts pre-warmed: the first time you run it, its saved searches and model answers are copied here (emptying it just means they are copied again next time).
 
 **To keep a permanent record.** What matters is the result of a run, not the downloaded papers. `run` saves it where you point `--out`: the page
 (`results/org.html`) and, next to it, an audit trail (`results/org.audit.jsonl`). `confoundsearch audit results/org.audit.jsonl > report.md` checks that

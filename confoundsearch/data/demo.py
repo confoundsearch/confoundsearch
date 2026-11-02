@@ -12,14 +12,23 @@ The file is a saved-searches database (`confoundsearch.data.cache`) built by `de
 from __future__ import annotations
 
 import math
+import shutil
 import sqlite3
 from pathlib import Path
 
+from confoundsearch.data.cache import database_path
 from confoundsearch.errors import CorpusError
 from confoundsearch.logic.graph import Passage, normalize
 
 DEMO_FILE = Path(__file__).with_name("demo.sqlite3")
 DEMO_QUESTION = ("Organizational structure", "Firm performance")
+RECORDED_MODEL = "gpt-4.1-mini"  # the model whose answers are saved for the example question
+PREWARMED_NOTE = (
+    "Note: this is the built-in example question. Its searches, and the answers of the default model\n"
+    f"({RECORDED_MODEL}), are already saved (a pre-warmed cache) in your data directory, so those come back\n"
+    "instantly and for free. That is to show what a fast run looks like. It is a stub: any other question,\n"
+    "or another model, runs live and takes longer."
+)
 STOPWORDS = frozenset(
     (  # noqa: SIM905  (one string is easier to read and extend)
         "a an and are as at be by for from has have how in is it its of on or that the their this to was "
@@ -82,3 +91,22 @@ class DemoCorpus:
                 scored.append((-score, passage.id, passage))
         scored.sort(key=lambda item: item[:2])
         return [passage for _, _, passage in scored[: max(k, 0)]]
+
+
+def seed_demo_cache(folder: Path, question: tuple[str, str], source: Path = DEMO_FILE) -> str | None:
+    """Pre-warm `folder` for the demo question: copy the shipped saved searches in if it has none yet.
+
+    Returns None for any other question, "seeded" when it copied the file, "present" when the data directory
+    already had one (its own saved searches are never overwritten).
+    """
+    target = database_path(folder, DEMO_QUESTION)
+    if database_path(folder, question) != target or not source.is_file():
+        return None
+    if target.is_file():
+        return "present"
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        shutil.copyfile(source, target)
+    except OSError:  # a read-only or full disk: the run goes on, just without the head start
+        return None
+    return "seeded"

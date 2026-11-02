@@ -134,9 +134,11 @@ class KeywordService:
         transport: Transport = urllib_transport,
         sleep: Callable[[float], None] = time.sleep,
         tries: int = 4,
+        max_k: int = SERVICE_MAX_K,
     ) -> None:
         self.store = HttpVectorStore(base_url, timeout, transport, sleep, tries)
         self.embedder = embedder
+        self.max_k = max_k  # the most neighbours the service returns in one answer (its manifest says)
 
     def query(
         self,
@@ -168,12 +170,22 @@ class KeywordService:
 
     def _by_phrase(self, phrase: str, embed: Embedder, k: int, min_works: int, distinct: bool) -> list[Match]:
         flt = {"works": {"$gte": min_works}} if min_works else None
-        wanted = min(pool_size(k), SERVICE_MAX_K) if distinct else k
+        wanted = min(pool_size(k), self.max_k) if distinct else k
         found = self.store.query(embed(phrase), wanted, flt)
         return without_echoes(found, phrase, k) if distinct else found[:k]
 
     def manifest(self) -> dict[str, Any]:
         return self.store.manifest()
+
+    def learn_limits(self) -> int:
+        """Take max_k from the service's manifest if it says (else keep the old value). Returns it."""
+        try:
+            said = self.manifest().get("max_k")
+        except VectorStoreError:
+            return self.max_k
+        if isinstance(said, int) and not isinstance(said, bool) and said > 0:
+            self.max_k = said
+        return self.max_k
 
 
 class HttpCorpus:

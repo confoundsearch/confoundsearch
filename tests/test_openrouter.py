@@ -325,7 +325,7 @@ class TestTheCommandLine:
         monkeypatch.setattr(cli, "make_server", lambda *a, **k: Server())
         cli.main(["serve", "--model", SLUG, "--openrouter", "--corpus-file", str(DEMO)])
         audited = seen[0].env.judge.client
-        assert isinstance(audited, AuditedClient) and audited.client.client.api_key == KEY
+        assert isinstance(audited, AuditedClient) and audited.client.client.client.api_key == KEY
 
 
 class TestAWholeRun:

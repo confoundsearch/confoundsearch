@@ -15,6 +15,7 @@ from confoundsearch.data.vectors import (
     VectorStore,
 )
 from confoundsearch.errors import CorpusError, InvalidAction, LLMError, RemoteError, VectorStoreError
+from confoundsearch.interface.expander import build_expander
 from confoundsearch.interface.export import export_zip, save_export, to_share_data
 from confoundsearch.logic.actions import (
     Action,
@@ -34,8 +35,10 @@ from confoundsearch.logic.graph import Graph, Passage, Vertex
 from confoundsearch.logic.policy import EpsilonGreedy, LookaheadQ, Softmax
 from confoundsearch.logic.reward import phi, reward
 from confoundsearch.logic.state import State
+from confoundsearch.logic.terms import Expansion, KeywordExpander, Term, expand_terms
 from confoundsearch.logic.transition import Environment, Judge
 from confoundsearch.model.embeddings import OpenAIEmbedder
+from confoundsearch.model.expansion import LLMTermVariants
 from confoundsearch.model.llm import (
     LLMConfounds,
     LLMJudge,
@@ -63,6 +66,7 @@ __all__ = [
     "Environment",
     "EpsilonGreedy",
     "ExpandedCorpus",
+    "Expansion",
     "Graph",
     "HttpCorpus",
     "HttpVectorStore",
@@ -70,6 +74,7 @@ __all__ = [
     "InMemoryVectorStore",
     "InvalidAction",
     "Judge",
+    "KeywordExpander",
     "KeywordIndex",
     "KeywordNotFound",
     "KeywordService",
@@ -79,6 +84,7 @@ __all__ = [
     "LLMProposer",
     "LLMRewordings",
     "LLMSynonyms",
+    "LLMTermVariants",
     "LookaheadQ",
     "Match",
     "Merge",
@@ -95,12 +101,15 @@ __all__ = [
     "State",
     "Step",
     "Stop",
+    "Term",
     "Trajectory",
     "VectorRecord",
     "VectorStore",
     "VectorStoreError",
     "Vertex",
+    "build_expander",
     "enumerate_actions",
+    "expand_terms",
     "export_zip",
     "phi",
     "reward",

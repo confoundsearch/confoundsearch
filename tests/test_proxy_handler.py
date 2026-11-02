@@ -65,6 +65,7 @@ class TestReading:
             "count": 3,
             "file": "https://files.example.test/kw.f16",
             "papers": False,
+            "max_k": 5,
         }
 
     def test_query_returns_the_nearest_and_only_the_public_metadata(self):

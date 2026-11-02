@@ -3,14 +3,22 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sqlite3
 import sys
 from pathlib import Path
 
 import pytest
 
-from confoundsearch.data.cache import PaperDatabase
-from confoundsearch.data.demo import DEMO_FILE, DEMO_QUESTION, DemoCorpus
+from confoundsearch.data.cache import CachedCorpus, PaperDatabase, database_path
+from confoundsearch.data.demo import (
+    DEMO_FILE,
+    DEMO_QUESTION,
+    PREWARMED_NOTE,
+    RECORDED_MODEL,
+    DemoCorpus,
+    seed_demo_cache,
+)
 from confoundsearch.errors import CorpusError, RemoteError
 from confoundsearch.interface import cli
 from confoundsearch.logic.graph import Passage
@@ -21,7 +29,7 @@ ROOT = Path(__file__).parent.parent
 
 class TestTheShippedFile:
     def test_it_is_there_and_is_a_plain_saved_searches_database(self):
-        assert DEMO_FILE.is_file() and DEMO_FILE.stat().st_size < 3_000_000
+        assert DEMO_FILE.is_file() and DEMO_FILE.stat().st_size < 6_000_000
         db = sqlite3.connect(
             f"{DEMO_FILE.resolve().as_uri()}?mode=ro", uri=True
         )  # never write to the shipped file
@@ -123,12 +131,18 @@ class Stub:
 
 
 class TestTheBuilder:
-    def test_it_asks_about_the_question_and_each_confound_in_several_wordings(self):
+    def test_it_lists_the_searches_a_default_run_makes_first_for_each_confound(self):
         builder = load_builder()
-        asked = builder.queries("Organizational structure", "Firm performance")
-        assert asked[0] == "Organizational structure Firm performance"
-        assert "firm size Firm performance" in asked and len(asked) == 4 + 3 * len(builder.CONFOUNDS)
-        assert len(set(asked)) == len(asked)
+        iv, dv = "Organizational structure", "Firm performance"
+        exact = builder.exact_queries(iv, dv)
+        assert exact[:2] == ["firm size Organizational structure", "firm size Firm performance"]
+        assert len(exact) == 2 * len(builder.CONFOUNDS) and len(set(exact)) == len(exact)
+
+    def test_and_a_broader_set_that_gives_the_offline_demo_its_papers(self):
+        builder = load_builder()
+        broad = builder.broad_queries("Organizational structure", "Firm performance")
+        assert broad[0] == "Organizational structure Firm performance"
+        assert "firm size Firm performance" in broad and len(set(broad)) == len(broad)
 
     def test_it_writes_a_database_of_what_it_found(self, tmp_path, monkeypatch, capsys):
         builder = load_builder()
@@ -137,16 +151,25 @@ class TestTheBuilder:
         out = tmp_path / "demo.sqlite3"
         out.write_bytes(b"an older build")  # replaced, not added to
         assert builder.main(["--out", str(out)]) == 0
+        iv, dv = builder.DEMO_QUESTION
+        wanted = len(builder.exact_queries(iv, dv)) + len(builder.broad_queries(iv, dv))
         searches, papers = PaperDatabase(out).counts()
-        assert searches == 2 * len(builder.queries(*builder.DEMO_QUESTION)) and papers == searches // 2
+        assert searches == 2 * wanted and papers >= 1
         assert "(0 of" in capsys.readouterr().out
+        db = sqlite3.connect(f"{out.resolve().as_uri()}?mode=ro", uri=True)
+        try:
+            sizes = {k for (k,) in db.execute("SELECT DISTINCT k FROM searches")}
+        finally:
+            db.close()
+        assert sizes == {builder.RESULTS, builder.BROAD}  # three per search, as a default run asks for
 
     def test_a_build_with_many_failures_is_not_kept_quietly(self, tmp_path, monkeypatch, capsys):
         builder = load_builder()
         monkeypatch.setattr(builder, "SemanticScholarCorpus", lambda *a, **k: Stub(fail=True))
         monkeypatch.setattr(builder, "OpenAlexCorpus", lambda *a, **k: Stub())
-        assert builder.main(["--out", str(tmp_path / "demo.sqlite3")]) == 1  # half the searches failed
-        assert "failed" in capsys.readouterr().err
+        out = tmp_path / "demo.sqlite3"
+        assert builder.main(["--out", str(out)]) == 1  # half the searches failed
+        assert "nothing written" in capsys.readouterr().err and not out.exists()
 
     def test_a_few_failures_are_tolerated(self, tmp_path, monkeypatch):
         builder = load_builder()
@@ -162,6 +185,161 @@ class TestTheBuilder:
         monkeypatch.setattr(builder, "SemanticScholarCorpus", lambda *a, **k: Flaky())
         monkeypatch.setattr(builder, "OpenAlexCorpus", lambda *a, **k: Stub())
         assert builder.main(["--out", str(tmp_path / "demo.sqlite3")]) == 0
+
+    def test_with_models_it_also_records_real_runs_at_the_default_and_the_demo_setting(
+        self, tmp_path, monkeypatch
+    ):
+        builder = load_builder()
+        monkeypatch.setattr(builder, "SemanticScholarCorpus", lambda *a, **k: Stub())
+        monkeypatch.setattr(builder, "OpenAlexCorpus", lambda *a, **k: Stub())
+        ran = []
+        monkeypatch.setattr(cli, "main", lambda argv=None: ran.append(list(argv)) or 0)
+        assert builder.main(["--out", str(tmp_path / "demo.sqlite3"), "--models", "m1", "m2"]) == 0
+        pairs = [(a[a.index("--model") + 1], a[a.index("--confounds") + 1]) for a in ran]
+        assert pairs == [("m1", "8"), ("m1", "4"), ("m2", "8"), ("m2", "4")]  # `run`'s default, then `demo`'s
+        assert all(a[0] == "run" and "--cache-dir" in a for a in ran)
+        assert len({a[a.index("--cache-dir") + 1] for a in ran}) == 1  # one data directory for all
+        assert len({a[a.index("--out") + 1] for a in ran}) == 4  # a page each, so none overwrites another
+
+    def test_the_confound_counts_can_be_chosen(self, tmp_path, monkeypatch):
+        builder = load_builder()
+        monkeypatch.setattr(builder, "SemanticScholarCorpus", lambda *a, **k: Stub())
+        monkeypatch.setattr(builder, "OpenAlexCorpus", lambda *a, **k: Stub())
+        ran = []
+        monkeypatch.setattr(cli, "main", lambda argv=None: ran.append(list(argv)) or 0)
+        builder.main(["--out", str(tmp_path / "d.sqlite3"), "--models", "m", "--confounds", "5"])
+        assert [a[a.index("--confounds") + 1] for a in ran] == ["5"]
+
+    def test_clean_removes_emails_and_leaves_one_plain_file(self, tmp_path):
+        builder = load_builder()
+        at = "@"
+        path = tmp_path / "d.sqlite3"
+        PaperDatabase(path).save(
+            "s", "q", 3, [Passage("1", f"mail x{at}example.org now", f"T y{at}example.org", "u")]
+        )
+        assert builder.clean(path) == (1, 1)
+        db = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
+        try:
+            text, title = db.execute("SELECT text, title FROM papers").fetchone()
+            mode = db.execute("PRAGMA journal_mode").fetchone()[0]
+        finally:
+            db.close()
+        assert (text, title, mode) == ("mail x now", "T y", "delete") or (
+            "@" not in text + title and mode == "delete"
+        )
+
+
+class TestThePrewarmedCache:
+    def source(self, tmp_path):
+        path = tmp_path / "shipped.sqlite3"
+        PaperDatabase(path).save(
+            "semanticscholar", "firm size Organizational structure", 3, [Passage("1", "t", "T", "u")]
+        )
+        return path
+
+    def test_the_example_question_gets_the_saved_searches_copied_in_once(self, tmp_path):
+        folder, source = tmp_path / "data", self.source(tmp_path)
+        assert seed_demo_cache(folder, ("organizational  STRUCTURE", "firm performance"), source) == "seeded"
+        target = database_path(folder, DEMO_QUESTION)
+        assert target.read_bytes() == source.read_bytes()
+        assert target.parent.stat().st_mode & 0o777 == 0o700
+        assert seed_demo_cache(folder, DEMO_QUESTION, source) == "present"
+
+    def test_a_data_directory_that_already_has_it_is_never_overwritten(self, tmp_path):
+        folder, source = tmp_path / "data", self.source(tmp_path)
+        seed_demo_cache(folder, DEMO_QUESTION, source)
+        PaperDatabase(database_path(folder, DEMO_QUESTION)).save(
+            "s", "mine", 3, [Passage("2", "x", "Mine", "u")]
+        )
+        assert seed_demo_cache(folder, DEMO_QUESTION, source) == "present"
+        assert PaperDatabase(database_path(folder, DEMO_QUESTION)).counts() == (2, 2)
+
+    def test_any_other_question_gets_nothing(self, tmp_path):
+        assert (
+            seed_demo_cache(tmp_path / "data", ("IT investment", "Firm performance"), self.source(tmp_path))
+            is None
+        )
+        assert not (tmp_path / "data").exists()
+
+    def test_without_the_shipped_file_or_a_place_to_write_it_the_run_just_goes_on(self, tmp_path):
+        assert seed_demo_cache(tmp_path / "data", DEMO_QUESTION, tmp_path / "missing.sqlite3") is None
+        blocked = tmp_path / "file-not-folder"
+        blocked.write_text("x")
+        assert seed_demo_cache(blocked, DEMO_QUESTION, self.source(tmp_path)) is None
+
+    def test_the_note_is_polite_and_says_it_is_a_stub(self):
+        flat = " ".join(PREWARMED_NOTE.split())
+        assert "pre-warmed cache" in flat and "stub" in flat and "instantly" in flat
+        assert "any other question" in PREWARMED_NOTE
+
+    def run_args(self, tmp_path, *more, iv="Organizational structure", dv="Firm performance"):
+        return [
+            *["run", *COMMON, "--iv", iv, "--dv", dv, "--out", str(tmp_path / "p.html")],
+            *["--cache-dir", str(tmp_path / "data"), "--max-steps", "2", *more],
+        ]
+
+    def test_running_the_example_question_says_so_and_pre_warms_the_data_directory(
+        self, tmp_path, monkeypatch, capsys, env
+    ):
+        from tests.test_cli import fake_backend
+
+        monkeypatch.setattr(cli, "build_backend", fake_backend(env))
+        assert cli.main(self.run_args(tmp_path)) == 0
+        assert "pre-warmed cache" in " ".join(capsys.readouterr().err.split())  # the note wraps over lines
+        assert database_path(tmp_path / "data", DEMO_QUESTION).is_file()
+        events = [json.loads(line) for line in (tmp_path / "p.log.jsonl").read_text().splitlines()]
+        assert [e["state"] for e in events if e["event"] == "prewarmed_cache"] == ["seeded"]
+        assert cli.main(self.run_args(tmp_path)) == 0  # the second time it is already there; still said
+        assert "pre-warmed cache" in " ".join(capsys.readouterr().err.split())
+
+    def test_no_note_for_other_questions_or_without_the_saved_searches(
+        self, tmp_path, monkeypatch, capsys, env
+    ):
+        from tests.test_cli import fake_backend
+
+        monkeypatch.setattr(cli, "build_backend", fake_backend(env))
+        for more, kwargs in [
+            ((), {"iv": "IT investment"}),
+            (("--no-cache",), {}),
+            (("--corpus", "demo"), {}),
+        ]:
+            assert cli.main(self.run_args(tmp_path, *more, **kwargs)) == 0
+            assert "pre-warmed" not in capsys.readouterr().err
+        assert not (tmp_path / "data").exists()
+
+    def test_the_note_never_goes_to_standard_output(self, tmp_path, monkeypatch, capsys, env):
+        from tests.test_cli import fake_backend
+
+        monkeypatch.setattr(cli, "build_backend", fake_backend(env))
+        cli.main([*self.run_args(tmp_path), "--json"])
+        captured = capsys.readouterr()
+        assert json.loads(captured.out)["question"] and "pre-warmed" in " ".join(captured.err.split())
+
+
+class TestTheShippedSavedSearches:
+    """What the package ships must really answer a default run's searches from the data directory."""
+
+    def test_the_searches_a_default_run_makes_first_are_all_there_for_both_sources(self, tmp_path):
+        builder = load_builder()
+        assert seed_demo_cache(tmp_path, DEMO_QUESTION) == "seeded"
+        iv, dv = DEMO_QUESTION
+
+        class Nothing:
+            def search(self, query, k):
+                raise AssertionError(f"went to the source for {query!r}")
+
+        for name in ("semanticscholar", "openalex"):
+            warmed = CachedCorpus(Nothing(), tmp_path, name, scope=lambda: DEMO_QUESTION)
+            for query in builder.exact_queries(iv, dv):
+                assert warmed.search(query, builder.RESULTS), (name, query)
+
+    def test_the_size_is_modest_and_the_searches_are_many(self):
+        db = sqlite3.connect(f"{DEMO_FILE.resolve().as_uri()}?mode=ro", uri=True)
+        try:
+            searches = db.execute("SELECT COUNT(*) FROM searches").fetchone()[0]
+        finally:
+            db.close()
+        assert DEMO_FILE.stat().st_size < 6_000_000 and searches >= 200
 
 
 class TestScrubbing:
@@ -195,7 +373,7 @@ class TestTheDemoCommand:
     def parse(self, *argv):
         return cli.build_parser().parse_args(["demo", *argv])
 
-    def test_the_defaults_are_the_happy_path(self):
+    def test_the_defaults_are_a_short_example_run(self):
         args = self.parse()
         assert (args.out, args.confounds, args.max_budget, args.no_open) == (
             Path("confoundsearch-demo.html"),
@@ -220,22 +398,32 @@ class TestTheDemoCommand:
         monkeypatch.setenv("OPENAI_API_KEY", "k")
         assert cli.demo_model(self.parse("--openrouter")) == "openai/gpt-4.1-mini"
 
-    def test_without_any_key_it_says_what_to_do(self, capsys):
-        assert cli.main(["demo"]) == 1
+    def test_offline_without_any_key_it_says_what_to_do(self, capsys):
+        assert cli.main(["demo", "--offline"]) == 1
         assert "confoundsearch setup" in capsys.readouterr().err
 
-    def test_it_is_a_run_on_the_demo_papers_for_the_demo_question(self, monkeypatch, tmp_path):
+    def test_it_is_a_run_of_the_example_question_on_the_usual_sources(self, monkeypatch, tmp_path):
         monkeypatch.setenv("OPENAI_API_KEY", "k")
         seen = []
         real = cli.main
         monkeypatch.setattr(cli, "main", lambda argv=None: seen.append(list(argv)) or 0)
         assert real(["demo", "--out", str(tmp_path / "d.html"), "--confounds", "3"]) == 0
         (argv,) = seen
-        assert argv[:5] == ["run", "--corpus", "demo", "--model", "gpt-4.1-mini"]
+        assert (
+            argv[:3] == ["run", "--model", "gpt-4.1-mini"] and "--corpus" not in argv
+        )  # its cache is pre-warmed
         assert argv[argv.index("--iv") + 1] == "Organizational structure"
         assert argv[argv.index("--dv") + 1] == "Firm performance"
         assert argv[argv.index("--confounds") + 1] == "3" and argv[argv.index("--max-budget") + 1] == "1.0"
         assert argv[-1] == "--review"  # opens the result
+
+    def test_offline_searches_only_the_shipped_papers(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "k")
+        seen = []
+        real = cli.main
+        monkeypatch.setattr(cli, "main", lambda argv=None: seen.append(list(argv)) or 0)
+        real(["demo", "--offline", "--no-open"])
+        assert seen[0][:5] == ["run", "--corpus", "demo", "--model", "gpt-4.1-mini"]
 
     def test_options_for_the_model_and_not_opening_are_passed_on(self, monkeypatch):
         seen = []
@@ -271,3 +459,167 @@ class TestTheDemoCommand:
         assert cli.main(["demo", "--out", str(out)]) == 0
         assert out.exists() and opened == [out]
         assert cli.main(["demo", "--out", str(out), "--no-open"]) == 0 and len(opened) == 1
+
+
+class TestResumingABuild:
+    def test_reuse_continues_from_an_earlier_folder_without_searching_again(self, tmp_path, monkeypatch):
+        builder = load_builder()
+        asked = []
+
+        class Recording(Stub):
+            def search(self, query, k):
+                asked.append(query)
+                return super().search(query, k)
+
+        monkeypatch.setattr(builder, "SemanticScholarCorpus", lambda *a, **k: Recording())
+        monkeypatch.setattr(builder, "OpenAlexCorpus", lambda *a, **k: Recording())
+        work = tmp_path / "earlier"
+        PaperDatabase(database_path(work, DEMO_QUESTION)).save(
+            "semanticscholar", "q", 3, [Passage("1", "x", "T", "u")]
+        )
+        out = tmp_path / "demo.sqlite3"
+        assert builder.main(["--out", str(out), "--reuse", str(work)]) == 0
+        assert asked == [] and PaperDatabase(out).counts() == (1, 1)
+
+
+class TestRecordingTheModelsAnswers:
+    def fake_main(self, tmp_path, fresh_by_pass, replay_code=0):
+        """A stand-in for `run` that writes a log saying how much it had to do afresh."""
+        calls = []
+
+        def main(argv=None):
+            argv = list(argv)
+            calls.append(argv)
+            log = Path(argv[argv.index("--log") + 1])
+            if "--replay" in argv:
+                log.write_text(json.dumps({"event": "model_cache_hit"}) + "\n")
+                return replay_code
+            fresh = fresh_by_pass[
+                min(len([a for a in calls if "--replay" not in a]) - 1, len(fresh_by_pass) - 1)
+            ]
+            events = [{"event": "cache_miss"}] * fresh + [{"event": "model_cache_hit"}, {"event": "step"}]
+            log.write_text("".join(json.dumps(e) + "\n" for e in events))
+            return 0
+
+        return main, calls
+
+    def test_it_repeats_until_a_pass_finds_everything_saved_then_proves_it_replays(
+        self, tmp_path, monkeypatch
+    ):
+        builder = load_builder()
+        main, calls = self.fake_main(tmp_path, [5, 2, 0])
+        monkeypatch.setattr(cli, "main", main)
+        assert builder.record_demo(tmp_path) is True
+        assert len(calls) == 4 and "--replay" in calls[-1] and all("--replay" not in c for c in calls[:-1])
+        first = calls[0]
+        assert (
+            first[first.index("--model") + 1] == RECORDED_MODEL
+            and first[first.index("--confounds") + 1] == "4"
+        )
+        assert (
+            first[first.index("--corpus") + 1] == "semanticscholar,openalex"
+        )  # the sources `demo` replays on
+        assert first[first.index("--cache-dir") + 1] == str(tmp_path)
+
+    def test_it_gives_up_if_the_run_never_settles(self, tmp_path, monkeypatch):
+        builder = load_builder()
+        main, calls = self.fake_main(tmp_path, [3])
+        monkeypatch.setattr(cli, "main", main)
+        assert builder.record_demo(tmp_path, passes=3) is False and len(calls) == 3  # never got to the replay
+
+    def test_a_replay_that_fails_is_a_failed_recording(self, tmp_path, monkeypatch):
+        builder = load_builder()
+        main, _ = self.fake_main(tmp_path, [0], replay_code=1)
+        monkeypatch.setattr(cli, "main", main)
+        assert builder.record_demo(tmp_path) is False
+
+    def test_a_run_that_errors_is_not_counted_as_settled(self, tmp_path, monkeypatch):
+        builder = load_builder()
+        monkeypatch.setattr(
+            cli, "main", lambda argv=None: Path(argv[argv.index("--log") + 1]).write_text("") or 1
+        )
+        assert builder.record_demo(tmp_path, passes=2) is False
+
+    def test_fresh_work_counts_searches_and_model_calls_made_afresh(self, tmp_path):
+        builder = load_builder()
+        log = tmp_path / "l.jsonl"
+        events = [
+            "cache_miss",
+            "cache_hit",
+            "model_cache_miss",
+            "model_cache_hit",
+            "step",
+            "model_cache_miss",
+        ]
+        log.write_text("".join(json.dumps({"event": e}) + "\n" for e in events))
+        assert builder.fresh_work(log) == 3
+
+    def test_with_record_the_build_keeps_the_file_only_if_the_replay_proves_out(self, tmp_path, monkeypatch):
+        builder = load_builder()
+        monkeypatch.setattr(builder, "SemanticScholarCorpus", lambda *a, **k: Stub())
+        monkeypatch.setattr(builder, "OpenAlexCorpus", lambda *a, **k: Stub())
+        monkeypatch.setattr(builder, "record_demo", lambda work: True)
+        good = tmp_path / "good.sqlite3"
+        assert builder.main(["--out", str(good), "--record"]) == 0 and good.exists()
+        monkeypatch.setattr(builder, "record_demo", lambda work: False)
+        bad = tmp_path / "bad.sqlite3"
+        assert builder.main(["--out", str(bad), "--record"]) == 1 and not bad.exists()
+
+
+class TestTheShippedRecording:
+    """What ships must replay the whole example run by itself: if a prompt or the code changes, this fails."""
+
+    def argv(self, tmp_path, *more):
+        iv, dv = DEMO_QUESTION
+        return [
+            *[
+                "run",
+                "--corpus",
+                "semanticscholar,openalex",
+                "--model",
+                RECORDED_MODEL,
+                "--iv",
+                iv,
+                "--dv",
+                dv,
+            ],
+            *[
+                "--confounds",
+                "4",
+                "--cache-dir",
+                str(tmp_path / "data"),
+                "--out",
+                str(tmp_path / "p.html"),
+                *more,
+            ],
+        ]
+
+    def test_the_example_run_replays_completely_with_no_model_and_no_network(self, tmp_path, monkeypatch):
+        def no_network(*args, **kwargs):
+            raise AssertionError("went to the network")
+
+        monkeypatch.setattr(cli, "urllib_transport", no_network)
+        monkeypatch.setattr(
+            cli, "build_client", lambda args: pytest.fail("a replay must not build a model client")
+        )
+        assert cli.main(self.argv(tmp_path, "--replay")) == 0
+        events = [json.loads(line)["event"] for line in (tmp_path / "p.log.jsonl").read_text().splitlines()]
+        assert events.count("model_cache_hit") >= 30 and "model_cache_miss" not in events
+        assert "cache_miss" not in events and events.count("cache_hit") >= 20  # every search was saved too
+
+    def test_demo_with_no_keys_at_all_works_and_says_so(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(cli, "urllib_transport", lambda *a, **k: pytest.fail("went to the network"))
+        assert cli.main(["demo", "--no-open", "--out", str(tmp_path / "d.html")]) == 0
+        captured = capsys.readouterr()
+        said = " ".join(captured.err.split())
+        assert "No language model key found" in said and "pre-warmed cache" in said
+        assert "model calls were answered from saved replies, at no cost" in captured.out
+        assert (tmp_path / "d.html").exists() and (tmp_path / "d.audit.jsonl").exists()
+
+    def test_its_audit_trail_is_intact_and_says_the_answers_were_replays(self, tmp_path):
+        cli.main(self.argv(tmp_path, "--replay"))
+        from confoundsearch.logic.audit import AuditTrail
+
+        trail = AuditTrail.load(tmp_path / "p.audit.jsonl")
+        assert trail.intact and trail.complete
+        assert "model calls were answered from saved replies, not asked afresh." in trail.to_markdown()

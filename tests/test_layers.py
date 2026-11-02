@@ -29,12 +29,20 @@ from confoundsearch.model.llm import ChatClient
 PACKAGE = Path(confoundsearch.__file__).parent
 LAYERS = ("logic", "data", "model", "interface")
 PLUMBING = {"errors", "http", "dotenv", "runlog"}  # shared, used by the layers that need them
-COMPOSITION_ROOT = {"cli", "result", "skill", "__main__"}  # the interface units that wire everything together
+COMPOSITION_ROOT = {
+    "cli",
+    "result",
+    "skill",
+    "__main__",
+    "expander",
+    "modelcache",  # joins the data layer's store to the model layer's client
+}  # the interface units that wire everything together
 BACKEND = {"server", "export"}
 
 # What each layer may import: {layer: {unit: names or None for any}}. A unit is a module or package directly
 # inside a layer directory (graph, actions, corpus, ...).
 LOGIC_UNITS = {
+    "terms",
     "graph",
     "state",
     "actions",

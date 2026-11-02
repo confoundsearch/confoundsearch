@@ -30,18 +30,33 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 from confoundsearch import __version__
-from confoundsearch.data.cache import CachedCorpus, cache_dir, flush, wait_for_writes
+from confoundsearch.data.cache import (
+    CachedCorpus,
+    PaperDatabase,
+    cache_dir,
+    databases,
+    flush,
+    wait_for_writes,
+)
 from confoundsearch.data.corpus import Corpus, InMemoryCorpus
-from confoundsearch.data.demo import DEMO_QUESTION, DemoCorpus
+from confoundsearch.data.demo import (
+    DEMO_QUESTION,
+    PREWARMED_NOTE,
+    RECORDED_MODEL,
+    DemoCorpus,
+    seed_demo_cache,
+)
 from confoundsearch.data.es import ElasticsearchCorpus
-from confoundsearch.data.keyword_service import HttpCorpus, service_url
+from confoundsearch.data.keyword_service import HttpCorpus, KeywordService, service_url
 from confoundsearch.data.multi import MultiCorpus
 from confoundsearch.data.sources import OpenAlexCorpus, SemanticScholarCorpus
 from confoundsearch.dotenv import keep_out_of_git, load_dotenv, update_dotenv
-from confoundsearch.errors import BudgetReached, RemoteError
+from confoundsearch.errors import BudgetReached, RemoteError, ReplayMiss
 from confoundsearch.http import Transport, resilient, urllib_transport
+from confoundsearch.interface.expander import build_expander
 from confoundsearch.interface.export import to_share_data
 from confoundsearch.interface.known import load_known, page_from_json
+from confoundsearch.interface.modelcache import CachedClient, find_cached
 from confoundsearch.interface.result import run_result
 from confoundsearch.interface.review import FORMATS as REVIEW_FORMATS
 from confoundsearch.interface.review import load_share, open_page, review_text, where_it_went
@@ -56,6 +71,8 @@ from confoundsearch.logic.expand import ExpandedCorpus
 from confoundsearch.logic.policy import EpsilonGreedy, LookaheadQ, Policy
 from confoundsearch.logic.reward import phi
 from confoundsearch.logic.transition import Environment
+from confoundsearch.model.embeddings import OpenAIEmbedder
+from confoundsearch.model.expansion import FIELDS
 from confoundsearch.model.llm import (
     OPENROUTER_URL,
     ChatClient,
@@ -320,6 +337,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="stop once the language model has cost about this many dollars (an estimate from tokens used); "
         "what was found so far is kept",
     )
+    run.add_argument(
+        "--replay",
+        action="store_true",
+        help="answer every model call from saved replies, asking no model (so no key is needed): only for a "
+        "question whose replies are saved, such as the built-in example",
+    )
     run.add_argument("--epsilon", type=float, default=0.1, help="epsilon-greedy only")
     run.add_argument("--seed", type=int, help="epsilon-greedy only: makes its choices repeatable")
     run.add_argument(
@@ -348,8 +371,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     demo = commands.add_parser(
         "demo",
-        help="the happy path: run the shipped demo papers on organizational structure and firm performance, "
-        "then open the result",
+        help="try it: a short example run on the built-in question (organizational structure and firm "
+        "performance), then open the result. Its searches ship pre-saved, so it is fast",
     )
     demo.add_argument(
         "--model", help="default: gpt-4.1-mini, or openai/gpt-4.1-mini with only an OpenRouter key"
@@ -361,6 +384,57 @@ def build_parser() -> argparse.ArgumentParser:
     demo.add_argument("--confounds", type=int, default=4, metavar="N", help="how many confounds to look for")
     demo.add_argument("--max-budget", type=float, default=1.0, metavar="USD", help="stop at about this cost")
     demo.add_argument("--no-open", action="store_true", help="write the page but do not open it")
+    demo.add_argument(
+        "--offline",
+        action="store_true",
+        help="search only the shipped example papers: no internet needed for the searches",
+    )
+
+    expand = commands.add_parser(
+        "expand",
+        help="turn a construct into a long list of query terms (model synonyms and nearest keywords)",
+    )
+    expand.add_argument("construct", help='the idea to expand, e.g. "firm size"')
+    expand.add_argument("--model", help="default: a small cheap model that fits the key that is set")
+    expand.add_argument("--base-url", help="default: $OPENAI_BASE_URL or https://api.openai.com/v1")
+    expand.add_argument("--api-key", help="default: $OPENAI_API_KEY (with --openrouter: $OPENROUTER_API_KEY)")
+    expand.add_argument("--openrouter", action="store_true", help="use OpenRouter")
+    expand.add_argument(
+        "--api",
+        help="address of the ConfoundSearch service that holds the keyword vectors "
+        "(default: $CONFOUNDSEARCH_API, else the address built into confoundsearch)",
+    )
+    expand.add_argument(
+        "--rounds", type=int, default=5, help="times to ask the model, each from another angle"
+    )
+    expand.add_argument("--per-round", type=int, default=12, help="terms asked for in each round")
+    expand.add_argument(
+        "--fields",
+        default=",".join(FIELDS),
+        help="fields to ask the model about, comma separated, or `none` (default: nine social sciences)",
+    )
+    expand.add_argument("--per-field", type=int, default=8, help="terms asked for from each field")
+    expand.add_argument(
+        "--per-variant", type=int, default=4, help="synonyms asked for of each field term (0: none)"
+    )
+    expand.add_argument("--per-hypernym", type=int, default=3, help="broader terms asked for (0: none)")
+    expand.add_argument(
+        "--neighbor-top", type=int, default=100, help="how many of the best keywords to ask synonyms of"
+    )
+    expand.add_argument(
+        "--per-neighbor", type=int, default=2, help="synonyms asked for of each of those (0: none)"
+    )
+    expand.add_argument("--max-seeds", type=int, default=150, help="most terms to fetch neighbours for")
+    expand.add_argument("--per-term", type=int, default=100, help="nearest keywords fetched for each term")
+    expand.add_argument("--limit", type=int, default=1000, help="most terms to return")
+    expand.add_argument(
+        "--min-works", type=int, default=0, help="only keywords used by at least this many papers"
+    )
+    expand.add_argument(
+        "--context", default="", help="a sentence of setting for the model, e.g. what is studied"
+    )
+    expand.add_argument("--json", action="store_true", help="print the terms as JSON")
+    expand.add_argument("--out", type=Path, help="also write the full result here as JSON")
 
     audit = commands.add_parser("audit", help="check and read an audit trail written by a run")
     audit.add_argument("file", type=Path, help="an audit trail (.jsonl)")
@@ -527,6 +601,7 @@ def describe_run(args: argparse.Namespace) -> dict[str, Any]:
         "max_steps": args.max_steps,
         "max_budget": args.max_budget,
         "cache": None if args.no_cache else str(args.cache_dir or cache_dir()),
+        "replay": bool(getattr(args, "replay", False)),
         "sources": corpus_names(args) if not args.corpus_file or args.corpus else ["file"],
         "keys_present": {
             "model": bool(key),
@@ -539,9 +614,15 @@ def describe_run(args: argparse.Namespace) -> dict[str, Any]:
 
 def build_backend(args: argparse.Namespace) -> Backend:
     runlog = getattr(args, "runlog", None)
-    client = AuditedClient(
-        Announced(build_client(args), runlog.event if runlog else None, getattr(args, "max_budget", None))
+    log = runlog.event if runlog else None
+    asked = None if getattr(args, "replay", False) else build_client(args)  # replaying needs no model, no key
+    # the model's answers are saved too (unless --no-cache), so the same question is never paid for twice
+    chat: ChatClient = (
+        asked
+        if args.no_cache and asked is not None
+        else CachedClient(asked, args.cache_dir or cache_dir(), current_question, log, model=args.model)
     )
+    client = AuditedClient(Announced(chat, log, getattr(args, "max_budget", None)))
     corpus = build_corpus(args)
     if (
         args.policy == "deterministic"
@@ -621,13 +702,23 @@ def demo_model(args: argparse.Namespace) -> str | None:
 def demo(args: argparse.Namespace) -> int:
     """Run the demo papers through `run`, so the demo is the real program on a small known question."""
     model = demo_model(args)
-    if model is None:
+    replay = model is None and not args.offline
+    if model is None and not replay:
         print(
             "error: no language model key found; run `confoundsearch setup` first (or set OPENAI_API_KEY)",
             file=sys.stderr,
         )
         return 1
-    argv = ["run", "--corpus", "demo", "--model", model, "--iv", DEMO_IV, "--dv", DEMO_DV]
+    if replay:  # no key: replay the recorded example run, which needs no model and no internet
+        print(
+            "No language model key found, so this replays the recorded example run (its searches and the\n"
+            "model's answers ship with the package). To run it live, add a key: `confoundsearch setup`.\n",
+            file=sys.stderr,
+        )
+        model = RECORDED_MODEL
+    argv = ["run", *(["--corpus", "demo"] if args.offline else []), "--model", str(model)]
+    argv += ["--corpus", "semanticscholar,openalex", "--replay"] if replay else []
+    argv += ["--iv", DEMO_IV, "--dv", DEMO_DV]
     argv += ["--confounds", str(args.confounds), "--max-budget", str(args.max_budget), "--out", str(args.out)]
     for flag, value in (("--base-url", args.base_url), ("--api-key", args.api_key)):
         argv += [flag, value] if value else []
@@ -646,8 +737,14 @@ def flush_saved(args: argparse.Namespace) -> int:
         return 1
     folder = args.cache_dir or cache_dir()
     question = (args.iv, args.dv) if args.iv is not None else None
+    replies = sum(
+        PaperDatabase(path).call_count() for path in databases(folder, question)
+    )  # counted before they go
     searches, papers, freed = flush(folder, question)
-    print(f"removed {searches} saved searches and {papers} papers ({freed / 1_000_000:.1f} MB) from {folder}")
+    print(
+        f"removed {searches} saved searches, {papers} papers and {replies} model replies "
+        f"({freed / 1_000_000:.1f} MB) from {folder}"
+    )
     return 0
 
 
@@ -711,6 +808,83 @@ def install_skill(args: argparse.Namespace) -> int:
     return status
 
 
+def expand(args: argparse.Namespace) -> int:
+    """`confoundsearch expand "firm size"`: a long list of terms, recall first and precision later."""
+    model = demo_model(args)
+    if model is None:
+        print(
+            "error: give --model, or set OPENAI_API_KEY (or OPENROUTER_API_KEY) in a .env file",
+            file=sys.stderr,
+        )
+        return 1
+    address = service_url(args.api)
+    if not address:
+        print(
+            "error: the keyword service has no address (or is switched off): give --api URL", file=sys.stderr
+        )
+        return 1
+    args.model = model
+    service = KeywordService(
+        address, embedder=OpenAIEmbedder()
+    )  # a non-keyword phrase is embedded with your key
+    expander = build_expander(
+        build_client(args),
+        service,
+        args.rounds,
+        args.per_round,
+        args.context,
+        args.min_works,
+        args.per_term,
+        args.limit,
+        fields=()
+        if args.fields.strip().casefold() == "none"
+        else tuple(f.strip() for f in args.fields.split(",") if f.strip()),
+        per_field=args.per_field,
+        per_variant=args.per_variant,
+        max_seeds=args.max_seeds,
+        per_hypernym=args.per_hypernym,
+        neighbor_top=args.neighbor_top,
+        per_neighbor=args.per_neighbor,
+    )
+    result = expander.expand(args.construct)
+    payload = {
+        "construct": result.construct,
+        "counts": result.counts(),
+        "skipped": result.skipped,
+        "terms": [
+            {
+                "text": t.text,
+                "kind": t.kind,
+                "score": t.score,
+                "works": t.works,
+                "found_via": list(t.found_via),
+            }
+            for t in result.terms
+        ],
+    }
+    if args.out:
+        args.out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    if args.json:
+        print(json.dumps(payload, indent=2))
+    else:
+        for t in result.terms:
+            score = "" if t.score is None else f"{t.score:.3f}"
+            works = "" if t.works is None else str(t.works)
+            print(f"{t.kind:<9} {score:>6} {works:>9}  {t.text}")
+    counts = result.counts()
+    parts = ", ".join(f"{n} {kind}" for kind, n in counts.items())
+    print(
+        f"{len(result.terms)} terms: {parts}"
+        + (f"; {len(result.skipped)} step(s) skipped" if result.skipped else ""),
+        file=sys.stderr,
+    )
+    for problem in getattr(expander.synonyms, "problems", []):
+        print(f"  the model step had a problem: {problem}", file=sys.stderr)
+    for what, why in result.skipped.items():
+        print(f"  skipped {what!r}: {why}", file=sys.stderr)
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     load_dotenv(Path.cwd() / ".env")  # before the parser reads its defaults from the environment
     args = build_parser().parse_args(argv)
@@ -727,6 +901,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "review":
         return review(args.input, args.format)
+    if args.command == "run" and args.replay and args.no_cache:
+        print("error: --replay answers from the saved replies, which --no-cache turns off", file=sys.stderr)
+        return 1
     if args.command == "run" and args.json and args.review == "text":
         print("error: --review text prints to the terminal, which --json keeps for the JSON", file=sys.stderr)
         return 1
@@ -736,12 +913,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.log or args.out.with_name(f"{args.out.stem}.log.jsonl"), echo=args.status
         )
         runlog.event("run_started", **describe_run(args))
+        uses_cache = not args.no_cache and any(n not in ("file", "demo") for n in corpus_names(args))
+        warmed = seed_demo_cache(args.cache_dir or cache_dir(), (args.iv, args.dv)) if uses_cache else None
+        if warmed:  # the built-in example question: say plainly that its searches are already saved
+            runlog.event("prewarmed_cache", state=warmed)
+            print(f"{PREWARMED_NOTE}\n", file=sys.stderr)
     if args.command == "setup":
         return setup(args)
     if args.command == "flush":
         return flush_saved(args)
     if args.command == "demo":
         return demo(args)
+    if args.command == "expand":
+        return expand(args)
     if args.command == "install-skill":
         return install_skill(args)
     if args.command == "audit":
@@ -811,7 +995,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             stopped = str(err)
             trajectory = Trajectory(env.initial_state(args.iv, args.dv), steps, audit=log)
             runlog.event("budget_reached", message=stopped, steps=len(steps))
-        except RemoteError as err:  # a search or the model refused: keep what the run had found so far
+        except (
+            RemoteError,
+            ReplayMiss,
+        ) as err:  # a search or the model refused: keep what the run had so far
             failed = f"{type(err).__name__}: {err}"
             trajectory = Trajectory(env.initial_state(args.iv, args.dv), steps, audit=log)
             runlog.event("run_failed", error=failed, steps=len(steps))
@@ -843,6 +1030,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(where_it_went(args.out, audit_path, trajectory.audit_trail().intact, runlog.path))
         if spent:
             print(f"language model cost, estimated from tokens: about ${spent:.2f}")
+        cached = find_cached(backend.client)
+        if cached is not None and cached.hits:
+            calls = cached.hits + cached.misses
+            print(f"{cached.hits} of {calls} model calls were answered from saved replies, at no cost")
     if failed:
         print(
             f"error: the run stopped early: {failed}\nWhat it had found so far is in {args.out}; "

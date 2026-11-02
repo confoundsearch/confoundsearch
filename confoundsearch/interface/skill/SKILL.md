@@ -28,8 +28,9 @@ initiative: it spends the user's money.
      server. The model name always goes in `--model`;
    - papers: by default the hosted index, which needs `ES_URL` and `ES_API_KEY`. Alternatives are
      `--corpus semanticscholar` (a free key in `S2_KEY` lifts the rate limit), `--corpus openalex`, or
-     `--corpus-file passages.jsonl`. To try the tool with no search at all, `confoundsearch demo` (or `--corpus demo`) uses a few hundred papers
-     shipped with the package, about organizational structure and firm performance. With no `--corpus`, every source that is set up is searched and merged.
+     `--corpus-file passages.jsonl`. To try the tool quickly, `confoundsearch demo` runs the built-in example question (organizational structure and firm
+     performance) from saved searches and saved model answers: it takes about a second, costs nothing and needs no keys.
+     `--offline` (or `--corpus demo`) searches only the papers shipped with the package. With no `--corpus`, every source that is set up is searched and merged.
    Variables can live in a `.env` file in the working directory.
 3. If something is missing, tell the user exactly which variable to set in `.env` and stop.
    **Never ask the user to paste a key into the chat, and never echo one.**

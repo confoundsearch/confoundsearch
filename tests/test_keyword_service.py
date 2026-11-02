@@ -35,7 +35,7 @@ class FakeService:
                 raise HttpError(f"HTTP {status} from {url}: busy", status, 0.0 if status == 429 else None)
         path = url.split("//", 1)[1].split("/", 1)[1]
         if path == "v1/manifest":
-            return json.dumps({"version": 1, "dims": 2}).encode()
+            return json.dumps({"version": 1, "dims": 2, "max_k": 400}).encode()
         if path == "v1/fetch":
             records = [
                 {"id": i, "values": VECTORS[i], "metadata": {"name": NAMES[i], "works": 10}}
@@ -97,7 +97,7 @@ def test_fetch_goes_in_batches_and_leaves_out_unknown_ids():
 
 
 def test_the_manifest_is_a_plain_dictionary():
-    assert service()[0].manifest() == {"version": 1, "dims": 2}
+    assert service()[0].manifest() == {"version": 1, "dims": 2, "max_k": 400}
 
 
 def test_busy_replies_are_retried_then_succeed():
@@ -349,3 +349,29 @@ class TestServiceUrl:
         for make in (HttpVectorStore, HttpCorpus, KeywordService):
             with pytest.raises(VectorStoreError, match="no service address"):
                 make()
+
+
+class TestLimits:
+    def test_the_service_says_how_many_neighbours_one_answer_may_hold(self):
+        db = KeywordService("https://api.example.test", transport=FakeService(), sleep=lambda s: None)
+        assert db.max_k == 100 and db.learn_limits() == 400 and db.max_k == 400
+
+    def test_without_an_answer_the_old_limit_stays(self):
+        for body in (b'{"version": 1}', b'{"max_k": "lots"}', b'{"max_k": 0}', b'{"max_k": true}'):
+            db = KeywordService("https://x.test", transport=lambda *a, body=body: body)
+            assert db.learn_limits() == 100
+        down = KeywordService("https://x.test", transport=FakeService(fail=[400]), sleep=lambda s: None)
+        assert down.learn_limits() == 100
+
+    def test_a_distinct_search_asks_for_a_wider_pool_the_higher_the_limit(self):
+        asked = []
+
+        def transport(url, headers, body, timeout):
+            if url.endswith("/v1/neighbors"):
+                raise HttpError(f"HTTP 404 from {url}: not a keyword", 404)
+            asked.append(json.loads(body)["k"])
+            return b'{"matches": []}'
+
+        db = KeywordService("https://x.test", embedder=lambda t: [1.0, 0.0], transport=transport, max_k=1000)
+        db.query("zzz", k=60, distinct=True)
+        assert asked == [240]  # the pool, now that the service allows more than 100

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from confoundsearch import State
+from confoundsearch import Passage, State
 from tests.conftest import P1, P2, SIZE
 
 
@@ -15,6 +15,18 @@ def test_updates_return_new_states():
     s2 = s.with_observed(frozenset({P1}))
     assert s.observed == frozenset() and s2.observed == {P1}
     assert s2.with_observed(frozenset({P2})).observed == {P1, P2}
+
+
+def test_a_paper_seen_twice_with_different_text_is_kept_once_with_the_fuller_text():
+    short, full = Passage("p", "short"), Passage("p", "the fuller abstract")
+    state = State.initial("a", "b").with_observed(frozenset({short}))
+    assert state.with_observed(frozenset({full})).observed == {full}  # a fuller copy replaces it
+    assert state.with_observed(frozenset({full})).with_observed(frozenset({short})).observed == {full}
+    assert state.with_observed(frozenset({Passage("p", "other")})).observed == {
+        Passage("p", "short")
+    }  # a tie keeps the first
+    both = State.initial("a", "b").with_observed(frozenset({short, full}))
+    assert both.observed == {full}  # even in one batch
 
 
 def test_with_graph_preserves_the_rest():

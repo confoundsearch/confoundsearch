@@ -87,7 +87,7 @@ def test_build_backend_with_a_jsonl_corpus(tmp_path):
     assert isinstance(env.judge, LLMJudge) and isinstance(proposer, Proposer)
     audited = env.judge.client
     assert isinstance(audited, AuditedClient)  # every model call goes into the run's audit trail
-    client = audited.client.client  # announced, then audited
+    client = audited.client.client.client  # announced, then cached, then the real client
     assert isinstance(client, OpenAICompatibleClient)
     assert (client.model, client.base_url, client.api_key) == ("m", "http://localhost:1/v1", "k")
 

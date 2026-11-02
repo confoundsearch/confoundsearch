@@ -21,7 +21,11 @@ that a single background thread empties, in order. `wait_for_writes()` returns w
     CachedCorpus(SemanticScholarCorpus(key), cache_dir(), "semanticscholar", scope=lambda: (iv, dv))
     flush(cache_dir())                         # empty it: `confoundsearch flush`
 
-Only papers and the questions asked are stored, never keys. A search that failed is not stored.
+The language model's answers are kept too (`model_calls`), keyed by the model and the exact prompt, so the
+same prompt is never paid for twice; see `confoundsearch.interface.modelcache`.
+
+Only papers, answers and the questions asked are stored, never keys. A search or call that failed is not
+stored.
 """
 
 from __future__ import annotations
@@ -37,7 +41,7 @@ import re
 import sqlite3
 import tempfile
 import threading
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Mapping
@@ -58,6 +62,10 @@ CREATE TABLE IF NOT EXISTS searches (
     source TEXT NOT NULL, query TEXT NOT NULL, k INTEGER NOT NULL, papers TEXT NOT NULL, saved TEXT NOT NULL,
     PRIMARY KEY (source, query, k)
 );
+CREATE TABLE IF NOT EXISTS model_calls (
+    key TEXT PRIMARY KEY, model TEXT NOT NULL, messages TEXT NOT NULL, reply TEXT NOT NULL,
+    saved TEXT NOT NULL
+);
 """
 
 
@@ -76,6 +84,13 @@ def cache_dir(environ: Mapping[str, str] | None = None) -> Path:
     if settings.get(ENV_VAR):
         return Path(settings[ENV_VAR]).expanduser()
     return default_dir()
+
+
+def call_key(model: str | None, temperature: float | None, messages: Sequence[Mapping[str, str]]) -> str:
+    """What identifies a model call: the model, its temperature and the exact messages sent."""
+    asked = {"model": model, "temperature": temperature, "messages": [dict(m) for m in messages]}
+    text = json.dumps(asked, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def paper_key(passage: Passage, source: str) -> str:
@@ -219,6 +234,43 @@ class PaperDatabase:
                 )
         except (sqlite3.Error, OSError):  # a read-only or full disk must not stop a search that worked
             pass
+
+    def load_call(self, key: str) -> str | None:
+        """The reply saved for this call, or None."""
+        if not self.path.exists():
+            return None
+        try:
+            with self._connect() as db:
+                row = db.execute("SELECT reply FROM model_calls WHERE key = ?", (key,)).fetchone()
+        except (sqlite3.Error, OSError):  # damaged: ask the model again
+            return None
+        return None if row is None else str(row[0])
+
+    def save_call(
+        self, key: str, model: str | None, messages: Sequence[Mapping[str, str]], reply: str
+    ) -> None:
+        try:
+            with self._connect() as db:
+                db.execute(
+                    "INSERT OR REPLACE INTO model_calls VALUES (?, ?, ?, ?, ?)",
+                    (
+                        key,
+                        model or "",
+                        json.dumps([dict(m) for m in messages], ensure_ascii=False),
+                        reply,
+                        datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                    ),
+                )
+        except (sqlite3.Error, OSError):  # a read-only or full disk must not stop a run that worked
+            pass
+
+    def call_count(self) -> int:
+        """How many model replies are saved."""
+        try:
+            with self._connect() as db:
+                return int(db.execute("SELECT COUNT(*) FROM model_calls").fetchone()[0])
+        except (sqlite3.Error, OSError):
+            return 0
 
     def counts(self) -> tuple[int, int]:
         """(searches, papers) saved."""

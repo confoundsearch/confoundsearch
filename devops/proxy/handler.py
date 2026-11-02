@@ -233,7 +233,8 @@ def route(
         return reply(
             200,
             {"version": VERSION, "model": config.model, "dims": config.dims,
-             "count": config.count, "file": config.file_url, "papers": config.papers},
+             "count": config.count, "file": config.file_url, "papers": config.papers,
+             "max_k": config.max_k},
         )  # fmt: skip
     if path == "/v1/neighbors" and method == "POST":
         body = parse_body(event)

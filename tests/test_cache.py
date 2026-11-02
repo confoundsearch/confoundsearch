@@ -399,7 +399,7 @@ class TestCommandLine:
     def test_flush_empties_everything_and_says_what_it_did(self, tmp_path, capsys):
         go(cached(Counting(PAPER), tmp_path / "c"))
         assert cli.main(["flush", "--cache-dir", str(tmp_path / "c")]) == 0
-        assert "removed 1 saved searches and 1 papers" in capsys.readouterr().out
+        assert "removed 1 saved searches, 1 papers and 0 model replies" in capsys.readouterr().out
         assert not (tmp_path / "c").exists()
 
     def test_flush_can_take_one_question(self, tmp_path, capsys):

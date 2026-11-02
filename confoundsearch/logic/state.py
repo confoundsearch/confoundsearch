@@ -31,7 +31,17 @@ class State:
         return State(graph, self.observed, self.rejected, self.done)
 
     def with_observed(self, passages: frozenset[Passage]) -> State:
-        return State(self.graph, self.observed | passages, self.rejected, self.done)
+        """Add passages to what has been observed, one per id.
+
+        Where two copies of a paper differ (two searches returned different versions of its abstract) the
+        fuller one is kept, so a paper is never offered twice.
+        """
+        best = {p.id: p for p in self.observed}
+        for passage in passages:
+            kept = best.get(passage.id)
+            if kept is None or len(passage.text) > len(kept.text):
+                best[passage.id] = passage
+        return State(self.graph, frozenset(best.values()), self.rejected, self.done)
 
     def with_rejected(self, edge: Edge, passage: Passage) -> State:
         return State(self.graph, self.observed, self.rejected | {(edge, passage.id)}, self.done)

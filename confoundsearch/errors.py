@@ -11,6 +11,14 @@ class BudgetReached(RuntimeError):
     """The money the user allowed for the language model has been spent; the run stops here."""
 
 
+class ReplayMiss(RuntimeError):
+    """A replay-only run needed an answer from the model that has not been saved.
+
+    Not a RemoteError on purpose: the code that carries on when the model is unreachable would otherwise
+    swallow it, and a replay that found nothing would look like a finished run.
+    """
+
+
 class RemoteError(RuntimeError):
     """A remote HTTP service failed or returned something unusable."""
 

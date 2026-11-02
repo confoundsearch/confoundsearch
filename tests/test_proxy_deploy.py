@@ -217,3 +217,11 @@ def test_the_form_refuses_a_blank_or_malformed_code_location_and_zone_id(name, a
 
     assert all(allowed(v) for v in accepted) and not any(allowed(v) for v in refused)
     assert parameter["ConstraintDescription"]  # and the message says what is wanted
+
+
+def test_the_largest_answer_is_a_setting_with_sensible_bounds_that_the_function_gets():
+    template = load_template()
+    parameter = template["Parameters"]["MaxK"]
+    assert parameter["Default"] == 100 and parameter["MinValue"] == 1 and parameter["MaxValue"] == 1000
+    environment = template["Resources"]["Function"]["Properties"]["Environment"]["Variables"]
+    assert environment["MAX_K"] == {"Ref": "MaxK"}

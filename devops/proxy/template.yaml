@@ -63,6 +63,12 @@ Parameters:
     Type: Number
     Default: 10
     Description: Short bursts above the steady rate.
+  MaxK:
+    Type: Number
+    Default: 100
+    MinValue: 1
+    MaxValue: 1000
+    Description: Most neighbours one answer may hold (also shown in the manifest). Raise it, up to 1000, for deep expansions; each answer then costs more Pinecone read units.
   MaxConcurrency:
     Type: Number
     Default: 5
@@ -136,7 +142,7 @@ Resources:
           EMBED_DIMS: !Ref EmbedDims
           KEYWORD_COUNT: !Ref KeywordCount
           LOCAL_COPY_URL: !Ref LocalCopyUrl
-          MAX_K: "100"
+          MAX_K: !Ref MaxK
       Policies:
         - Statement:
             - Effect: Allow

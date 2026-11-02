@@ -150,6 +150,14 @@ def current() -> AuditLog | None:
     return _CURRENT.get()
 
 
+_REPLAYED: contextvars.ContextVar[bool] = contextvars.ContextVar("confoundsearch_replayed", default=False)
+
+
+def mark_replayed() -> None:
+    """Say that the model call now being answered was answered from a saved reply, not by the model."""
+    _REPLAYED.set(True)
+
+
 @contextmanager
 def recording(log: AuditLog) -> Iterator[AuditLog]:
     """Make `log` the current log, so any AuditedClient used inside records to it."""
@@ -175,6 +183,7 @@ class AuditedClient:
         log = self.log or current()
         model = getattr(self.client, "model", None)
         sent = [dict(m) for m in messages]
+        _REPLAYED.set(False)  # a wrapped client sets it again when it answers from a saved reply
         try:
             reply = self.client.chat(messages)
         except Exception as err:
@@ -182,7 +191,9 @@ class AuditedClient:
                 log.record("model_error", model=model, messages=sent, error=f"{type(err).__name__}: {err}")
             raise
         if log is not None:
-            log.record("model_call", model=model, messages=sent, reply=reply)
+            # a replayed call says so: it is an earlier answer, not a fresh judgement by the model
+            extra = {"replayed": True} if _REPLAYED.get() else {}
+            log.record("model_call", model=model, messages=sent, reply=reply, **extra)
         return reply
 
 
@@ -415,8 +426,14 @@ class AuditTrail:
         lines += [
             f"{len(self.events)} events; hash chain {'intact' if self.intact else 'BROKEN'}; "
             f"{'complete' if self.complete else 'INCOMPLETE (no end-of-run event)'}.",
-            "",
         ]
+        calls = self.of_kind("model_call")
+        replayed = sum(1 for e in calls if e.data.get("replayed"))
+        if replayed:
+            lines.append(
+                f"{replayed} of {len(calls)} model calls were answered from saved replies, not asked afresh."
+            )
+        lines.append("")
         rows = self.evidence
         for label in dict.fromkeys(r.confound for r in rows):
             lines += [f"## {label}", ""]

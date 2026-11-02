@@ -118,6 +118,7 @@ existing template*) with the new `CodeKey`.
 | `PineconeIndex`, `PineconeHost` | `keywords`, empty | the index to read |
 | `ElasticUrl`, `ElasticKeyParameter`, `ElasticIndex` | empty, `/keywords/elastic-read-key`, `papers` | paper search. An empty `ElasticUrl` switches it off |
 | `EmbedModel`, `EmbedDims` | `text-embedding-3-small`, `512` | what the vectors were built with; shown in the manifest. The size is checked on every `/v1/query` (a vector of any other length is refused) |
+| `MaxK` | `100` | most neighbours one answer may hold (1 to 1000). Raise it for deep expansions; each answer then costs more Pinecone read units. The manifest reports it |
 | `RateLimit`, `BurstLimit` | `5`, `10` | requests per second the whole API accepts. Above that, API Gateway answers 429 |
 | `MaxConcurrency` | `5` | at most this many copies of the function at once: a hard cap on what a flood can cost |
 | `AlertEmail`, `MonthlyBudgetUsd` | empty, `10` | a warning at 80% of the month's budget. Empty skips it |
