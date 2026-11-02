@@ -51,10 +51,7 @@ unfamiliar, [this page](https://github.com/theskumar/python-dotenv#readme) expla
 | `OPENALEX_API_KEY` or `OPENALEX_EMAIL`: optional | [OpenAlex](https://openalex.org/settings/api) is a free, open index of scholarly papers run by the nonprofit OurResearch; the key needs a free account | Runs faster. A key or an email puts you in OpenAlex's faster, more reliable pool, so searches finish sooner and fewer fail. |
 | `OPENAI_API_KEY`: optional | An [OpenAI key](https://platform.openai.com/api-keys); its embedding models turn text into vectors, so similar meanings sit close together | Finds related keywords by meaning (say, "head count" for "firm size"), even for a phrase ConfoundSearch has never seen: an OpenAI model turns your phrase into numbers that can be compared. Set it even if the agent uses a different model. |
 
-Not a key: the [ConfoundSearch service](https://confoundsearch.org) is on by default and searches papers and keyword vectors for
-you. Your search terms go to it; `--api off` (or `CONFOUNDSEARCH_API=off`) turns it off.
-
-A run usually costs under $1 in model fees. `--max-budget USD` stops it at about that cost, keeping what it found.
+A run usually costs well under $1 in model fees. Runs really cost a few cents if that. However, if you are concerned, `--max-budget USD` stops at a given dollar limit.
 
 ## Data directory
 
