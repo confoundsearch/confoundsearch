@@ -48,9 +48,9 @@ unfamiliar, [this page](https://github.com/theskumar/python-dotenv#readme) expla
 
 | Variable name | API service / how to sign up | Why |
 | --- | --- | --- |
-| `OPENROUTER_API_KEY` or `OPENAI_API_KEY` | [OpenRouter](https://openrouter.ai/keys) sells access to hundreds of models from many providers behind one key; [OpenAI](https://platform.openai.com/api-keys): [here is how to get started with the OpenAI API](https://platform.openai.com/docs/quickstart) if that is unfamiliar | The agent reads each paper's abstract and judges whether it supports a causal claim, so every run makes model calls. Any OpenAI-compatible model works (`--model`). |
+| `OPENROUTER_API_KEY` or `OPENAI_API_KEY` | <ul><li>[OpenRouter](https://openrouter.ai/keys) sells access to hundreds of models from many providers behind one key</li><li>[OpenAI](https://platform.openai.com/api-keys): [here is how to get started with the OpenAI API](https://platform.openai.com/docs/quickstart) if that is unfamiliar</li></ul> | The agent reads each paper's abstract and judges whether it supports a causal claim, so every run makes model calls. Any OpenAI-compatible model works (`--model`). |
 
-You need one language-model key to run your own questions. (The demo works without it.) Technical users who want to run a locally hosted model should set `OPENAI_BASE_URL` to its address (for example `http://localhost:8000/v1`, or pass `--base-url`); a local model needs no key.
+You need one language-model key to run your own questions. Technical users who want to run a locally hosted model should set `OPENAI_BASE_URL` to its address (for example `http://localhost:8000/v1`, or pass `--base-url`); a local model needs no key.
 
 ### Strongly recommended keys
 
@@ -66,8 +66,8 @@ Most ConfoundSearch runs cost a few cents. If you are concerned, `--max-budget U
 
 As it searches, ConfoundSearch downloads papers and saves them in a *data directory*, a folder on your computer,
 so the same search is never made twice. This is a common
-pattern. For example, [Transformers](https://huggingface.co/docs/transformers) keeps models in a [folder set by `HF_HOME`](https://huggingface.co/docs/hub/local-cache). We use one small [SQLite](https://www.sqlite.org/about.html)
-file per question (pair of independent and dependent variable).
+pattern. For example, [Transformers](https://huggingface.co/docs/transformers) keeps models in a [cache folder](https://huggingface.co/docs/hub/local-cache) set by `HF_HOME`.
+For more on the caching system, see [the code](confoundsearch/data/cache.py).
 
 **Default location.** By default the data directory lives in your [temporary folder](https://en.wikipedia.org/wiki/Temporary_folder), which your
 computer automatically clears from time to time. The cache can get flushed periodically and the tool will still run fine.
@@ -95,6 +95,6 @@ curious about any of them, feel free to poke around:
 
 ### Other key directories
 
-- [`tests/`](tests): the unit tests, with 100% branch coverage. They also enforce the layer boundaries described in the technical appendix.
+- [`tests/`](tests): the unit tests, with 100% coverage. They also enforce the layer boundaries described in the technical appendix.
 - [`devops/`](devops): scripts for releasing, checking the package on every Python version, and publishing the anonymous review copy.
 - [`evals/`](evals): code and data for the pilot studies described in the technical appendix.

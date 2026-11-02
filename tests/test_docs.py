@@ -85,7 +85,7 @@ def test_the_package_page_is_minimal_and_has_no_links_that_would_break_on_pypi()
 
 
 def test_the_quick_start_commands_are_real():
-    """The README quick start: demo first, then the appendix figure's setup, install-skill, run --out, review --in."""
+    """The README quick start: the demo, then the appendix figure's setup, install-skill, run, review."""
     from confoundsearch.interface import cli
 
     text = README.read_text(encoding="utf-8")
