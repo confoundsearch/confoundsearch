@@ -80,7 +80,11 @@ def test_refuses_a_missing_blocklist_or_a_nonempty_destination(tmp_path):
     assert run(full).returncode == 2
 
 
-ALLOWED_GITHUB_OWNERS = {"astral-sh", "confoundsearch"}  # the ruff badge; the anonymous review account
+ALLOWED_GITHUB_OWNERS = {
+    "astral-sh",
+    "confoundsearch",
+    "theskumar",
+}  # ruff badge; review account; python-dotenv
 ALLOWED_EMAIL = ("example.com", "example.org", "noreply.github.com", "noreply.anthropic.com")
 SESSION = "claude" + ".ai/code"  # written in two parts so this file does not match itself
 OWNER = re.compile(r"github\.com/([A-Za-z0-9_-]+)/")

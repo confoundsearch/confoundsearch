@@ -35,37 +35,49 @@ longer jobs in a tmux/screen session or side terminal. See the technical appendi
 
 ## Keys
 
-`confoundsearch setup` asks for your keys and keeps them in a private `.env` file in the folder you run from (it is added to
-`.gitignore`, and a key is only ever sent to the service it belongs to). Why each one:
+`confoundsearch setup` asks for your API keys and saves them in a file called `.env` in the folder you run it from (if `.env` files are
+unfamiliar, [this page](https://github.com/theskumar/python-dotenv#readme) explains the idea). Your keys stay on your computer: each is sent only to
+the service it belongs to, never to us. ConfoundSearch still works if you leave some out, but you need a key for a language model unless you host an
+open-weight model yourself (most people lack the skills or hardware). Setup walks you through it, and you can edit `.env` later. From strictly
+necessary to nice to have:
 
-- **Language model** (`OPENROUTER_API_KEY` or `OPENAI_API_KEY`): required. The agent reads each paper's abstract and
-  judges whether it supports a causal claim, so every run makes model calls. Any OpenAI-compatible model works (`--model`).
-- **OpenAI** (`OPENAI_API_KEY`): also set this, even if the agent uses another model. Searching the keyword vectors for a
-  phrase that is not already in the pre-indexed set embeds that phrase with an OpenAI embedding model.
-- **Semantic Scholar** (`S2_KEY`, free from semanticscholar.org/product/api): optional but worth the two minutes. Without a
-  key you share a rate limit with every anonymous user, searches get refused (HTTP 429) and runs slow down or stop early.
-- **OpenAlex** (`OPENALEX_EMAIL` or `OPENALEX_API_KEY`): optional; an email puts you in OpenAlex's faster, more reliable pool.
-- **The ConfoundSearch service** (`confoundsearch.org`): on by default; it searches papers and the keyword vectors for you,
-  with no key of yours. Your search terms are sent to it. `--api off` (or `CONFOUNDSEARCH_API=off`) switches it off.
+| Key | The service, and where to get a key | Why |
+| --- | --- | --- |
+| `OPENROUTER_API_KEY` or `OPENAI_API_KEY`: **required** | [OpenRouter](https://openrouter.ai/keys) sells access to hundreds of models from many providers behind one key; [OpenAI](https://platform.openai.com/api-keys) is the maker of ChatGPT and sells its models the same way | The agent reads each paper's abstract and judges whether it supports a causal claim, so every run makes model calls. Any OpenAI-compatible model works (`--model`). |
+| `S2_KEY`: strongly recommended | [Semantic Scholar](https://www.semanticscholar.org/product/api) is a free academic search index run by the Allen Institute for AI; the key is free | Without one you share a rate limit with every anonymous user, searches get refused (HTTP 429) and runs slow down or stop early. |
+| `OPENALEX_API_KEY` or `OPENALEX_EMAIL`: optional | [OpenAlex](https://openalex.org/settings/api) is a free, open index of scholarly papers run by the nonprofit OurResearch; the key needs a free account | A key or an email puts you in its faster, more reliable pool. |
+| `OPENAI_API_KEY`: optional | An [OpenAI key](https://platform.openai.com/api-keys); its embedding models turn text into vectors, so similar meanings sit close together | Searching the keyword vectors for a phrase that is not already in the pre-indexed set embeds it. Set it even if the agent uses another model. |
 
-A run usually costs less than $1 in model fees; the searches are free. Cap it with `--max-budget USD`: the run stops once the
-estimated model cost reaches that, and keeps what it found so far.
+Not a key: the [ConfoundSearch service](https://confoundsearch.org) is on by default and searches papers and keyword vectors for
+you. Your search terms go to it; `--api off` (or `CONFOUNDSEARCH_API=off`) turns it off.
+
+A run usually costs under $1 in model fees. `--max-budget USD` stops it at about that cost, keeping what it found.
 
 ## Data directory
 
-ConfoundSearch downloads papers as it searches and keeps them in a data directory, the way `transformers` keeps models in
-`HF_HOME`. It holds one small SQLite database per question (independent and dependent variable), so the same search is never
-made twice: reruns are fast, use no rate limit, and return the same papers. Each paper is stored once, however many sources
-found it (same title, fuller abstract kept), and searches never wait for the disk.
+As it searches, ConfoundSearch downloads papers and saves them in a *data directory*, a folder on your computer, so the same search is never made
+twice: reruns are faster, use no rate limit and return the same papers. This is a [cache](https://en.wikipedia.org/wiki/Cache_(computing)), a common
+pattern: [Transformers](https://huggingface.co/docs/transformers) keeps models in a [folder set by `HF_HOME`](https://huggingface.co/docs/hub/local-cache),
+and [pip](https://pip.pypa.io/en/stable/topics/caching/) does the same with its downloads. Here it is one small [SQLite](https://www.sqlite.org/about.html)
+file per question (pair of independent and dependent variable), so studies never mix, and each paper is stored once.
 
-By default it is a folder in your system's temporary directory (`/tmp/confoundsearch-<you>` on Linux), which the system
-clears from time to time, so nothing there is precious. To keep it, set `CONFOUNDSEARCH_CACHE=~/confoundsearch-data`
-(`confoundsearch setup` asks, and saves it in `.env`) or pass `--cache-dir`. To empty it yourself run `confoundsearch flush`
-(everything) or `confoundsearch flush --iv "..." --dv "..."` (one question). `--no-cache` skips it for one run.
+**Where.** By default in your [temporary folder](https://en.wikipedia.org/wiki/Temporary_folder) (`/tmp/confoundsearch-<you>` on Linux), which your
+computer clears from time to time (Mac and Linux: after a restart or a few days; Windows: only if its automatic clean-up is on). Nothing there is
+precious: the next run just downloads again.
+
+**To keep it.** Set the [environment variable](https://en.wikipedia.org/wiki/Environment_variable) `CONFOUNDSEARCH_CACHE`, for example
+`CONFOUNDSEARCH_CACHE=~/confoundsearch-data`. `confoundsearch setup` asks for it and saves it in `.env`; `--cache-dir` sets it for one run.
+
+**To empty it.** `confoundsearch flush` (everything) or `confoundsearch flush --iv "..." --dv "..."` (one question). `--no-cache` ignores it for one run.
+
+**To keep a permanent record.** What matters is the result of a run, not the downloaded papers. `run` saves it where you point `--out`: the page
+(`results/org.html`) and, next to it, an audit trail (`results/org.audit.jsonl`). `confoundsearch audit results/org.audit.jsonl > report.md` checks that
+the trail is intact and prints a readable report of each confound, its supporting papers (with links) and which search found them.
 
 ## What's in this code base?
 
-The application is divided into four layers, as described in the technical appendix. Each is one directory:
+The application is divided into four layers, as described in the technical appendix. Each is one directory, and if you are
+curious about any of them, feel free to poke around:
 
 - **Data** ([`confoundsearch/data/`](confoundsearch/data)): where papers come from (hosted Elasticsearch, Semantic Scholar, OpenAlex, or your file).
 - **Logic** ([`confoundsearch/logic/`](confoundsearch/logic)): the Markov decision process (graph, moves, reward, policy) and the audit log.
@@ -77,4 +89,3 @@ The application is divided into four layers, as described in the technical appen
 - [`tests/`](tests): the unit tests, with 100% branch coverage. They also enforce the layer boundaries described in the technical appendix.
 - [`devops/`](devops): scripts for releasing, checking the package on every Python version, and publishing the anonymous review copy.
 - [`evals/`](evals): code and data for the pilot studies described in the technical appendix.
-- [`confoundsearch/data/elastic/`](confoundsearch/data/elastic): loads the corpus into Elasticsearch Serverless.

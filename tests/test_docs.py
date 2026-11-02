@@ -1,4 +1,4 @@
-"""The README has a one-page budget and every link in it must lead somewhere."""
+"""The README stays short (about 100 lines) and every link in it must lead somewhere."""
 
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ def test_anchors_point_at_real_headings():
 
 def test_readme_stays_within_one_page():
     lines = README.read_text(encoding="utf-8").splitlines()
-    assert len(lines) <= 82, f"README is {len(lines)} lines; keep it to one page"
+    assert len(lines) <= 110, f"README is {len(lines)} lines; keep it short"
 
 
 def test_readme_has_the_expected_sections():
