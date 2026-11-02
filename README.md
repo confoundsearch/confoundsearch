@@ -30,7 +30,8 @@ confoundsearch install-skill      # 4. optional: add the Claude skill
 
 # A run can be slow; we are working to reduce latency. We suggest a tmux/screen session or side terminal.
 # 5A. in Claude Code:  /confoundsearch iv="Organizational structure" dv="Firm performance"
-# 5B. or run the package directly (it searches every source you have set up):
+# 5B. or run the package directly (it searches every source you have set up).
+# The command below uses qwen/qwen3-max on OpenRouter.
 confoundsearch run --model qwen/qwen3-max \
   --iv "Organizational structure" --dv "Firm performance" \
   --max-budget 1.00 --out results/org.html
@@ -45,7 +46,7 @@ unfamiliar, [this page](https://github.com/theskumar/python-dotenv#readme) expla
 
 ### Required keys
 
-| Key | The service, and where to get a key | Why |
+| Variable name | API service / how to sign up | Why |
 | --- | --- | --- |
 | `OPENROUTER_API_KEY` or `OPENAI_API_KEY` | [OpenRouter](https://openrouter.ai/keys) sells access to hundreds of models from many providers behind one key; [OpenAI](https://platform.openai.com/api-keys): [here is how to get started with the OpenAI API](https://platform.openai.com/docs/quickstart) if that is unfamiliar | The agent reads each paper's abstract and judges whether it supports a causal claim, so every run makes model calls. Any OpenAI-compatible model works (`--model`). |
 
@@ -53,7 +54,7 @@ You need one language-model key to run your own questions. (The demo works witho
 
 ### Strongly recommended keys
 
-| Key | The service, and where to get a key | Why |
+| Variable name | API service / how to sign up | Why |
 | --- | --- | --- |
 | `S2_KEY` | [Semantic Scholar](https://www.semanticscholar.org/product/api) is a free academic search index run by the Allen Institute for AI; the key is free | Everything runs faster. Without a key you share a rate limit with every anonymous user, so searches get refused (HTTP 429) and runs slow down or stop early. |
 | `OPENALEX_API_KEY` or `OPENALEX_EMAIL` | [OpenAlex](https://openalex.org/settings/api) is a free, open index of scholarly papers run by the nonprofit OurResearch; the key needs a free account | Runs faster. A key or an email puts you in OpenAlex's faster, more reliable pool, so searches finish sooner and fewer fail. |
