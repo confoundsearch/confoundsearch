@@ -41,14 +41,23 @@ confoundsearch review --in results/org.html     # 6. open the interface: the con
 ## How to setup API keys
 
 `confoundsearch setup` asks for API keys and saves them in a file called `.env` in the folder where you run the code (if `.env` files are
-unfamiliar, [this page](https://github.com/theskumar/python-dotenv#readme) explains the idea). Your keys stay on your computer. Some keys are necessary, others are just nice to have because they make things run faster.
+unfamiliar, [this page](https://github.com/theskumar/python-dotenv#readme) explains the idea). Your keys stay on your computer. Some keys are required; others are strongly recommended because they make things run faster.
+
+### Required keys
 
 | Key | The service, and where to get a key | Why |
 | --- | --- | --- |
-| `OPENROUTER_API_KEY` or `OPENAI_API_KEY`: **required** for your own questions (the example works without) | [OpenRouter](https://openrouter.ai/keys) sells access to hundreds of models from many providers behind one key; [OpenAI](https://platform.openai.com/api-keys): [here is how to get started with the OpenAI API](https://platform.openai.com/docs/quickstart) if that is unfamiliar | The agent reads each paper's abstract and judges whether it supports a causal claim, so every run makes model calls. Any OpenAI-compatible model works (`--model`). |
-| `S2_KEY`: strongly recommended | [Semantic Scholar](https://www.semanticscholar.org/product/api) is a free academic search index run by the Allen Institute for AI; the key is free | Everything runs faster. Without a key you share a rate limit with every anonymous user, so searches get refused (HTTP 429) and runs slow down or stop early. |
-| `OPENALEX_API_KEY` or `OPENALEX_EMAIL`: optional | [OpenAlex](https://openalex.org/settings/api) is a free, open index of scholarly papers run by the nonprofit OurResearch; the key needs a free account | Runs faster. A key or an email puts you in OpenAlex's faster, more reliable pool, so searches finish sooner and fewer fail. |
-| `OPENAI_API_KEY`: optional | An [OpenAI key](https://platform.openai.com/api-keys); its embedding models turn text into vectors, so similar meanings sit close together | Finds related keywords by meaning (say, "head count" for "firm size"), even for a phrase ConfoundSearch has never seen: an OpenAI model turns your phrase into numbers that can be compared. Set it even if the agent uses a different model. |
+| `OPENROUTER_API_KEY` or `OPENAI_API_KEY` | [OpenRouter](https://openrouter.ai/keys) sells access to hundreds of models from many providers behind one key; [OpenAI](https://platform.openai.com/api-keys): [here is how to get started with the OpenAI API](https://platform.openai.com/docs/quickstart) if that is unfamiliar | The agent reads each paper's abstract and judges whether it supports a causal claim, so every run makes model calls. Any OpenAI-compatible model works (`--model`). |
+
+You need one language-model key to run your own questions. (The demo works without it.)
+
+### Strongly recommended keys
+
+| Key | The service, and where to get a key | Why |
+| --- | --- | --- |
+| `S2_KEY` | [Semantic Scholar](https://www.semanticscholar.org/product/api) is a free academic search index run by the Allen Institute for AI; the key is free | Everything runs faster. Without a key you share a rate limit with every anonymous user, so searches get refused (HTTP 429) and runs slow down or stop early. |
+| `OPENALEX_API_KEY` or `OPENALEX_EMAIL` | [OpenAlex](https://openalex.org/settings/api) is a free, open index of scholarly papers run by the nonprofit OurResearch; the key needs a free account | Runs faster. A key or an email puts you in OpenAlex's faster, more reliable pool, so searches finish sooner and fewer fail. |
+| `OPENAI_API_KEY` (for embeddings) | The same [OpenAI key](https://platform.openai.com/api-keys) as above. Its embedding models turn text into numbers, so similar meanings sit close together | Finds related keywords by meaning (say, "head count" for "firm size"), even for a phrase ConfoundSearch has never seen. Set it even if the agent uses a different model. |
 
 A run usually costs well under $1 in model fees. Runs really cost a few cents if that. However, if you are concerned, `--max-budget USD` stops at a given dollar limit.
 
