@@ -1,6 +1,6 @@
 # ConfoundSearch
 
-Supporting code for our Organization Science proposal: ConfoundSearch. Please see our submission documents for more.
+Supporting code for our Organization Science submission: ConfoundSearch. Please see our submission documents for more.
 
 ![coverage](devops/badges/coverage.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue)
