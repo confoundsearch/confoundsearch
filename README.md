@@ -42,7 +42,7 @@ confoundsearch review --in results/org.html     # 6. open the interface: the con
 ## How to setup API keys
 
 `confoundsearch setup` asks for API keys and saves them in a file called `.env` in the folder where you run the code (if `.env` files are
-unfamiliar, [this page](https://github.com/theskumar/python-dotenv#readme) explains the idea). Your keys stay on your computer. Some keys are necessary, others are just nice to have:
+unfamiliar, [this page](https://github.com/theskumar/python-dotenv#readme) explains the idea). Your keys stay on your computer. Some keys are necessary, others are just nice to have because they make things run faster.
 
 | Key | The service, and where to get a key | Why |
 | --- | --- | --- |
