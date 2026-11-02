@@ -1,39 +1,28 @@
 # ConfoundSearch
 
-Organization Science proposal: ConfoundSearch
-
-See our submission documents for more.
+Supporting code for our Organization Science proposal: ConfoundSearch. Please see our submission documents for more.
 
 ![coverage](devops/badges/coverage.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
 ![The interface: candidate confounds of organizational structure and firm performance, the diagram, and the papers behind one link](assets/example.png)
 
-*The interface on known confounds for organizational structure and firm performance. For an interactive demo, download
+*The interface showing possible confounds for organizational structure and firm performance. For an interactive demo, download
 [`assets/known_confounds.html`](assets/known_confounds.html) and open it in a browser.*
 
 ## Quick start
 
 ```bash
 pip install confoundsearch        # 1. install (Python 3.8+)
-confoundsearch setup              # 2. save your keys in a .env file (language model, Semantic Scholar)
-confoundsearch demo               # 3. try it: a short example run on the question below, then open the result
-confoundsearch install-skill      # 4. optional: add the Claude skill
-
-# A run can be slow; we are working to reduce latency. See below.
-# 5A. in Claude Code:  /confoundsearch iv="Organizational structure" dv="Firm performance"
-# 5B. or run the package directly (it searches every source you have set up):
-confoundsearch run --model qwen/qwen3-max \
-  --iv "Organizational structure" --dv "Firm performance" \
-  --max-budget 1.00 --out results/org.html
-
-confoundsearch review --in results/org.html     # 6. open the interface: the confounds as a causal graph
+confoundsearch demo               # 2. run a demo
 ```
 
-**Start with the example.** `confoundsearch demo` runs the example question above (organizational structure and firm performance) from start to
-finish and opens the result. For this one question the package ships with everything already saved: the searches and the language model's
-answers (a "pre-warmed" [data directory](#data-directory)). So it runs in about a second, costs nothing, and **works even if you have no keys at
-all**: without one it replays the recorded run. With a key it behaves the same. You will see a note, then a summary:
+ConfoundSearch has latency and requires API keys. The demo gives you a sense of how it works before a full setup.
+
+`confoundsearch demo` runs an example question (organizational structure and firm performance) from start to finish and opens the result.
+For this one question the package ships with everything already saved: the searches and the language model's answers (a "pre-warmed"
+[data directory](#data-directory)). So it runs in about a second, costs nothing, and **works even if you have no keys at all** (without one it
+replays the recorded run). You will see a note, then a summary:
 
 ```
 $ confoundsearch demo
@@ -44,8 +33,25 @@ Note: this is the built-in example question. Its searches, and the answers of th
 ```
 
 **This is a stub:** any other question, or another model, searches and asks live, which takes longer and costs a few cents. `--offline` searches only
-the example papers that ship with the package, but asks the model live (so it needs a key). We suggest running longer jobs in a tmux/screen session
-or side terminal. See the technical appendix for more.
+the example papers that ship with the package, but asks the model live (so it needs a key).
+
+### Full setup
+
+When you are ready to run your own questions:
+
+```bash
+confoundsearch setup              # 3. save your keys in a .env file (language model, Semantic Scholar)
+confoundsearch install-skill      # 4. optional: add the Claude skill
+
+# A run can be slow; we are working to reduce latency. We suggest a tmux/screen session or side terminal.
+# 5A. in Claude Code:  /confoundsearch iv="Organizational structure" dv="Firm performance"
+# 5B. or run the package directly (it searches every source you have set up):
+confoundsearch run --model qwen/qwen3-max \
+  --iv "Organizational structure" --dv "Firm performance" \
+  --max-budget 1.00 --out results/org.html
+
+confoundsearch review --in results/org.html     # 6. open the interface: the confounds as a causal graph
+```
 
 ## Keys
 
@@ -55,7 +61,7 @@ the service it belongs to, never to any other server. From strictly necessary to
 
 | Key | The service, and where to get a key | Why |
 | --- | --- | --- |
-| `OPENROUTER_API_KEY` or `OPENAI_API_KEY`: **required** for your own questions (the example works without) | [OpenRouter](https://openrouter.ai/keys) sells access to hundreds of models from many providers behind one key; [OpenAI](https://platform.openai.com/api-keys) is the maker of ChatGPT and sells its models the same way | The agent reads each paper's abstract and judges whether it supports a causal claim, so every run makes model calls. Any OpenAI-compatible model works (`--model`). |
+| `OPENROUTER_API_KEY` or `OPENAI_API_KEY`: **required** for your own questions (the example works without) | [OpenRouter](https://openrouter.ai/keys) sells access to hundreds of models from many providers behind one key; [OpenAI](https://platform.openai.com/api-keys): [here is how to get started with the OpenAI API](https://platform.openai.com/docs/quickstart) if that is unfamiliar | The agent reads each paper's abstract and judges whether it supports a causal claim, so every run makes model calls. Any OpenAI-compatible model works (`--model`). |
 | `S2_KEY`: strongly recommended | [Semantic Scholar](https://www.semanticscholar.org/product/api) is a free academic search index run by the Allen Institute for AI; the key is free | Everything runs faster. Without a key you share a rate limit with every anonymous user, so searches get refused (HTTP 429) and runs slow down or stop early. |
 | `OPENALEX_API_KEY` or `OPENALEX_EMAIL`: optional | [OpenAlex](https://openalex.org/settings/api) is a free, open index of scholarly papers run by the nonprofit OurResearch; the key needs a free account | Runs faster. A key or an email puts you in OpenAlex's faster, more reliable pool, so searches finish sooner and fewer fail. |
 | `OPENAI_API_KEY`: optional | An [OpenAI key](https://platform.openai.com/api-keys); its embedding models turn text into vectors, so similar meanings sit close together | Finds related keywords by meaning (say, "head count" for "firm size"), even for a phrase ConfoundSearch has never seen: an OpenAI model turns your phrase into numbers that can be compared. Set it even if the agent uses a different model. |

@@ -12,6 +12,7 @@ for neighbours in one call. `HttpVectorStore` is the lower-level view of the sam
 from __future__ import annotations
 
 import os
+import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
@@ -46,6 +47,9 @@ def service_url(setting: str | None = None) -> str | None:
     return None if chosen.casefold() in OFF_WORDS else chosen
 
 
+PACE = 0.25  # seconds between requests: the service allows 5 a second, and this keeps under it
+
+
 class HttpVectorStore:
     def __init__(
         self,
@@ -54,6 +58,8 @@ class HttpVectorStore:
         transport: Transport = urllib_transport,
         sleep: Callable[[float], None] = time.sleep,
         tries: int = 4,
+        min_interval: float = PACE,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         address = service_url(base_url)
         if address is None:
@@ -66,8 +72,20 @@ class HttpVectorStore:
         self.transport = transport
         self.sleep = sleep
         self.tries = tries
+        self.min_interval, self.clock = max(min_interval, 0.0), clock
+        self._lock, self._next = threading.Lock(), 0.0
+
+    def _pace(self) -> None:
+        """Space requests at least `min_interval` apart, across threads, so a burst stays under the limit."""
+        with self._lock:
+            now = self.clock()
+            wait = self._next - now
+            if wait > 0:
+                self.sleep(wait)
+            self._next = max(now, self._next) + self.min_interval
 
     def _call(self, path: str, payload: Mapping[str, Any] | None = None) -> Any:
+        self._pace()
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
         return json_call(
             self.transport, f"{self.base_url}{path}", headers, payload, self.timeout, self.sleep, self.tries

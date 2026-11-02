@@ -375,3 +375,41 @@ class TestLimits:
         db = KeywordService("https://x.test", embedder=lambda t: [1.0, 0.0], transport=transport, max_k=1000)
         db.query("zzz", k=60, distinct=True)
         assert asked == [240]  # the pool, now that the service allows more than 100
+
+
+class TestPacing:
+    def test_requests_are_spaced_so_a_burst_stays_under_the_limit(self):
+        from confoundsearch.data.keyword_service import HttpVectorStore
+
+        now, naps = [0.0], []
+
+        def nap(seconds):
+            naps.append(seconds)
+            now[0] += seconds
+
+        store = HttpVectorStore(
+            "https://svc.example.test",
+            transport=lambda *a: "{}",
+            sleep=nap,
+            min_interval=0.5,
+            clock=lambda: now[0],
+        )
+        for _ in range(3):
+            store._call("/v1/manifest")
+        assert naps == [0.5, 0.5]  # the first goes at once
+
+    def test_a_request_after_a_long_gap_does_not_wait(self):
+        from confoundsearch.data.keyword_service import HttpVectorStore
+
+        now, naps = [0.0], []
+        store = HttpVectorStore(
+            "https://svc.example.test",
+            transport=lambda *a: "{}",
+            sleep=naps.append,
+            min_interval=0.5,
+            clock=lambda: now[0],
+        )
+        store._call("/v1/manifest")
+        now[0] = 10.0
+        store._call("/v1/manifest")
+        assert naps == []

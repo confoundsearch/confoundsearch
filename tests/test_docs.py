@@ -86,11 +86,12 @@ def test_the_package_page_is_minimal_and_has_no_links_that_would_break_on_pypi()
 
 
 def test_the_quick_start_commands_are_real():
-    """The README quick start is the appendix figure: setup, demo, install-skill, run --out, review --in."""
+    """The README quick start: demo first, then the appendix figure's setup, install-skill, run --out, review --in."""
     from confoundsearch.interface import cli
 
     text = README.read_text(encoding="utf-8")
-    block = re.search(r"```bash\n(.*?)```", text, re.S).group(1)
+    section = text[text.index("## Quick start") : text.index("## Keys")]
+    block = "\n".join(re.findall(r"```bash\n(.*?)```", section, re.S))  # the quick start and the full setup
     commands = [line.split("#")[0].strip() for line in block.replace("\\\n", " ").splitlines()]
     parser = cli.build_parser()
     seen = [
@@ -98,7 +99,7 @@ def test_the_quick_start_commands_are_real():
         for command in commands
         if command.startswith("confoundsearch ")
     ]
-    assert [a.command for a in seen] == ["setup", "demo", "install-skill", "run", "review"]
+    assert [a.command for a in seen] == ["demo", "setup", "install-skill", "run", "review"]
     run, review = seen[3], seen[4]
     assert (
         str(run.out) == "results/org.html" and str(review.input) == "results/org.html"
