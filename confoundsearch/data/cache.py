@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS searches (
     source TEXT NOT NULL, query TEXT NOT NULL, k INTEGER NOT NULL, papers TEXT NOT NULL, saved TEXT NOT NULL,
     PRIMARY KEY (source, query, k)
 );
+CREATE TABLE IF NOT EXISTS example_papers (key TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS model_calls (
     key TEXT PRIMARY KEY, model TEXT NOT NULL, messages TEXT NOT NULL, reply TEXT NOT NULL,
     saved TEXT NOT NULL

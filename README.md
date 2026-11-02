@@ -48,7 +48,7 @@ unfamiliar, [this page](https://github.com/theskumar/python-dotenv#readme) expla
 
 | Variable name | API service / how to sign up | Why |
 | --- | --- | --- |
-| `OPENROUTER_API_KEY` or `OPENAI_API_KEY` | <ul><li>[OpenRouter](https://openrouter.ai/keys) sells access to hundreds of models from many providers behind one key</li><li>[OpenAI](https://platform.openai.com/api-keys): [here is how to get started with the OpenAI API](https://platform.openai.com/docs/quickstart) if that is unfamiliar</li></ul> | The agent reads each paper's abstract and judges whether it supports a causal claim, so every run makes model calls. Any OpenAI-compatible model works (`--model`). |
+| `OPENROUTER_API_KEY` or `OPENAI_API_KEY` | <ul><li>[OpenRouter](https://openrouter.ai/keys) sells access to hundreds of models from many providers behind one key</li><li>[OpenAI](https://platform.openai.com/api-keys) offers API access to its LLMs. [Here is how to get started with the OpenAI API](https://platform.openai.com/docs/quickstart) if that is unfamiliar.</li></ul> | The agent reads each paper's abstract and judges whether it supports a causal claim, so every run makes model calls. Any OpenAI-compatible model works (`--model`). |
 
 You need one language-model key to run your own questions. Technical users who want to run a locally hosted model should set `OPENAI_BASE_URL` to its address (for example `http://localhost:8000/v1`, or pass `--base-url`); a local model needs no key.
 

@@ -306,27 +306,34 @@ class TestTheCommandLine:
 
 
 class TestTheDemoWithoutAKey:
-    def test_with_no_key_the_example_run_is_replayed_and_the_user_is_told(
-        self, monkeypatch, capsys, tmp_path
-    ):
+    def capture(self, monkeypatch):
         seen = []
         real = cli.main
         monkeypatch.setattr(cli, "main", lambda argv=None: seen.append(list(argv)) or 0)
+        return seen, real
+
+    def test_with_no_key_the_curated_run_is_replayed_and_the_user_is_told(
+        self, monkeypatch, capsys, tmp_path
+    ):
+        seen, real = self.capture(monkeypatch)
         assert real(["demo", "--out", str(tmp_path / "d.html")]) == 0
         (argv,) = seen
         assert "--replay" in argv and argv[argv.index("--model") + 1] == RECORDED_MODEL
-        assert argv[argv.index("--corpus") + 1] == "semanticscholar,openalex"  # the sources that are saved
+        assert argv[argv.index("--corpus") + 1] == "demo"  # the shipped example papers
         said = " ".join(capsys.readouterr().err.split())
         assert "No language model key found" in said and "confoundsearch setup" in said
 
+    def test_with_no_key_and_live_it_replays_on_the_sources_whose_searches_ship_saved(
+        self, monkeypatch, tmp_path
+    ):
+        seen, real = self.capture(monkeypatch)
+        assert real(["demo", "--live", "--out", str(tmp_path / "d.html")]) == 0
+        (argv,) = seen
+        assert "--replay" in argv and argv[argv.index("--corpus") + 1] == "semanticscholar,openalex"
+        assert argv[argv.index("--confounds") + 1] == "4"
+
     def test_with_a_key_it_runs_live_and_does_not_replay_only(self, monkeypatch, tmp_path):
         monkeypatch.setenv("OPENAI_API_KEY", "k")
-        seen = []
-        real = cli.main
-        monkeypatch.setattr(cli, "main", lambda argv=None: seen.append(list(argv)) or 0)
+        seen, real = self.capture(monkeypatch)
         real(["demo", "--out", str(tmp_path / "d.html")])
         assert "--replay" not in seen[0]
-
-    def test_offline_still_needs_a_key(self, capsys):
-        assert cli.main(["demo", "--offline"]) == 1
-        assert "confoundsearch setup" in capsys.readouterr().err

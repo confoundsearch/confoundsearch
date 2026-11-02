@@ -38,6 +38,7 @@ def test_run_arguments():
     )
     assert (args.iv, args.dv, args.seed, args.max_steps, args.epsilon) == ("a", "b", 3, None, 0.1)
     assert (args.policy, args.confounds, args.synonyms) == ("deterministic", 8, None)
+    assert args.queries == 3
     assert str(args.out) == "r.html" and args.review is None
 
 
@@ -749,8 +750,14 @@ class TestThePolicy:
         trail = self.run_default(tmp_path, monkeypatch, env, "--confounds", "1", "--synonyms", "0")
         settings = trail.of_kind("run_started")[0].data["policy_settings"]
         assert settings["max_confounds"] == 1 and settings["synonyms_per_term"] == 0
+        assert settings["queries_per_side"] == 3
         queries = [e.data["query"] for e in trail.of_kind("retrieved")]
         assert queries and all("firm size" in q for q in queries)  # only the one confound it was allowed
+
+    def test_queries_sets_how_many_searches_each_side_gets(self, tmp_path, monkeypatch, env):
+        trail = self.run_default(tmp_path, monkeypatch, env, "--confounds", "1", "--queries", "5")
+        settings = trail.of_kind("run_started")[0].data["policy_settings"]
+        assert settings["queries_per_side"] == 5
 
     def test_epsilon_greedy_is_still_there_with_its_own_step_budget(self, tmp_path, monkeypatch, env):
         trail = self.run_default(tmp_path, monkeypatch, env, "--policy", "epsilon-greedy", "--seed", "1")

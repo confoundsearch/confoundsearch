@@ -26,11 +26,20 @@ import shutil
 import sqlite3
 import sys
 import tempfile
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from confoundsearch.data.cache import PaperDatabase, database_path, wait_for_writes
+from confoundsearch.data.cache import PaperDatabase, call_key, database_path, paper_key, wait_for_writes
 from confoundsearch.data.corpus import Corpus
-from confoundsearch.data.demo import DEMO_FILE, DEMO_QUESTION, RECORDED_MODEL
+from confoundsearch.data.demo import (
+    CURATED_CONFOUNDS,
+    CURATED_SEARCH,
+    DEMO_FILE,
+    DEMO_QUESTION,
+    RECORDED_MODEL,
+    DemoCorpus,
+)
+from confoundsearch.data.multi import title_key
 from confoundsearch.data.sources import OpenAlexCorpus, SemanticScholarCorpus
 from confoundsearch.errors import RemoteError
 from confoundsearch.http import resilient, urllib_transport
@@ -78,6 +87,31 @@ CONFOUNDS = (
     "economic environment",
     "organizational size",
 )
+KNOWN_STUDIES = (  # well-known published studies for the three curated confounds (see CURATED_CONFOUNDS)
+    "Who Lives in the C-Suite? Organizational Structure and the Division of Labor in Top Management",
+    "Delegation of Authority In Business Organizations: An Empirical Test",
+    "Information Technology, Workplace Organization, and the Demand for Skilled Labor: Firm-Level Evidence",
+    "Americans Do IT Better: US Multinationals and the Productivity Miracle",
+    "Managing with Style: The Effect of Managers on Firm Policies",
+    "The Spread of the Multidivisional Form Among Large Firms, 1919-1979",
+    "The Flattening Firm and Product Market Competition: "
+    "The Effect of Trade Liberalization on Corporate Hierarchies",
+    "The Organization of Firms Across Countries",
+    "Competition and Corporate Performance",
+    "Trade Liberalization, Exit, and Productivity Improvements: Evidence from Chilean Plants",
+)
+DISTRACTOR_QUERIES = (  # topical searches whose top papers pad the example set, so retrieval is not trivial
+    "organizational structure firm performance",
+    "decentralization of decision making",
+    "firm size and growth",
+    "industry effects on profitability",
+    "management quality",
+    "innovation and organizational design",
+    "organizational culture",
+    "strategy and structure",
+    "corporate governance",
+    "human capital productivity",
+)
 FORMS = (
     "{iv} {c}",
     "{c} {dv}",
@@ -115,43 +149,100 @@ def fresh_work(log: Path) -> int:
     return sum(1 for event in events if event in ("cache_miss", "model_cache_miss"))
 
 
-def record_demo(work: Path, passes: int = 5) -> bool:
+def save_curated_confounds(work: Path) -> None:
+    """Save the model's answer to "which confounds?" as the curated three, whatever the model would say.
+
+    This is the curation: the key is made from the very prompt a run sends, so the run finds this answer.
+    """
+    from confoundsearch.model.llm import LLMConfounds
+
+    sent: list[list[dict[str, str]]] = []
+
+    class Ask:
+        model, temperature = RECORDED_MODEL, 0.0
+
+        def chat(self, messages: Sequence[Mapping[str, str]]) -> str:
+            sent.append([dict(m) for m in messages])
+            return json.dumps({"confounds": list(CURATED_CONFOUNDS)})
+
+    iv, dv = DEMO_QUESTION
+    LLMConfounds(Ask(), len(CURATED_CONFOUNDS))(iv, dv)
+    reply = json.dumps({"confounds": list(CURATED_CONFOUNDS)})
+    PaperDatabase(database_path(work, DEMO_QUESTION)).save_call(
+        call_key(RECORDED_MODEL, 0.0, sent[0]), RECORDED_MODEL, sent[0], reply
+    )
+
+
+def record_demo(work: Path, passes: int = 5, curated: bool = False) -> bool:
     """Record the example run's model answers in `work`, and prove they replay with no model.
 
     The run is repeated until a pass finds everything already saved, so the prompts it saved match the papers
     as they now stand (a later search can improve a paper's abstract, and a prompt carries the abstract).
     Then it is run once more with `--replay`, which has no model to ask and fails on any answer missing.
+    With `curated`, the run searches the example set in `work` and asks about the three curated confounds.
     """
     from confoundsearch.interface import cli
 
     iv, dv = DEMO_QUESTION
+    db_path = database_path(work, DEMO_QUESTION)
+    corpus = ["--corpus", "demo"] if curated else ["--corpus", "semanticscholar,openalex"]
+    confounds = len(CURATED_CONFOUNDS) if curated else 4
+    if curated:
+        save_curated_confounds(work)
 
     def run(name: str, *extra: str) -> tuple[int, Path]:
         log = work / f"{name}.log.jsonl"
-        argv = [
-            "run",
-            "--corpus",
-            "semanticscholar,openalex",
-            "--model",
-            RECORDED_MODEL,
-            "--iv",
-            iv,
-            "--dv",
-            dv,
-        ]
-        argv += ["--confounds", "4", "--cache-dir", str(work), "--max-budget", "0.5", *extra]
+        argv = ["run", *corpus, "--model", RECORDED_MODEL, "--iv", iv, "--dv", dv]
+        argv += [*(CURATED_SEARCH if curated else ()), "--confounds", str(confounds)]
+        argv += ["--cache-dir", str(work), "--max-budget", "0.5", *extra]
         return cli.main([*argv, "--out", str(work / f"{name}.html"), "--log", str(log)]), log
 
-    for number in range(1, passes + 1):
-        code, log = run(f"record-{number}")
-        wait_for_writes()
-        print(f"  recording pass {number}: {fresh_work(log)} new", file=sys.stderr)
-        if code == 0 and fresh_work(log) == 0:
-            break
-    else:
-        return False
-    code, _ = run("replay", "--replay")
+    real = getattr(cli, "DemoCorpus")  # noqa: B009
+    setattr(cli, "DemoCorpus", lambda: DemoCorpus(db_path))  # noqa: B010  (read the file being built)
+    try:
+        for number in range(1, passes + 1):
+            code, log = run(f"record-{number}")
+            wait_for_writes()
+            print(f"  recording pass {number}: {fresh_work(log)} new", file=sys.stderr)
+            if code == 0 and fresh_work(log) == 0:
+                break
+        else:
+            return False
+        code, _ = run("replay", "--replay")
+    finally:
+        setattr(cli, "DemoCorpus", real)  # noqa: B010
     return code == 0
+
+
+def curate(db_path: Path, source: Corpus, distractors: int = 30) -> int:
+    """Put the known studies and some distractors into the example set the curated demo searches.
+
+    The studies' abstracts come from `source` (OpenAlex holds them in full). The distractors are the top
+    papers of a few topical searches over everything already saved, so the demo's search still has to choose.
+    Returns the size of the example set.
+    """
+    found: list[Passage] = []
+    for title in KNOWN_STUDIES:
+        want = title_key(title)
+        match = [p for p in source.search(title, 10) if title_key(p.title)[:50] == want[:50]]
+        if not match:
+            raise RemoteError(f"could not find the known study {title!r}")
+        found.append(scrubbed(match[:1])[0])
+    PaperDatabase(db_path).save("curated", "well-known studies for the curated example", len(found), found)
+    known = {paper_key(p, "curated") for p in found}
+    everything = DemoCorpus(db_path)  # no example set yet: this searches every saved paper
+    padding: dict[str, None] = {}
+    for query in DISTRACTOR_QUERIES:
+        for p in everything.search(query, 6):
+            if paper_key(p, "curated") not in known:
+                padding[paper_key(p, "curated")] = None
+    keys = sorted(known | set(list(padding)[:distractors]))
+    with contextlib.closing(sqlite3.connect(db_path)) as db:
+        db.execute("CREATE TABLE IF NOT EXISTS example_papers (key TEXT PRIMARY KEY)")
+        db.execute("DELETE FROM example_papers")
+        db.executemany("INSERT INTO example_papers VALUES (?)", [(k,) for k in keys])
+        db.commit()
+    return len(keys)
 
 
 def clean(path: Path) -> tuple[int, int]:
@@ -185,6 +276,12 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="also record the model's answers for the example run (needs a key for the default model), "
         "so `confoundsearch demo` replays it with no key",
+    )
+    parser.add_argument(
+        "--curate",
+        action="store_true",
+        help="build the curated example (known studies, three named confounds) and record its run "
+        "(needs a key for the default model)",
     )
     parser.add_argument(
         "--confounds",
@@ -235,6 +332,12 @@ def main(argv: list[str] | None = None) -> int:
                 ]
             )
         wait_for_writes()
+    if args.curate:
+        print(f"  curated example set: {curate(database.path, sources['openalex'])} papers", file=sys.stderr)
+        if not record_demo(work, curated=True):
+            print("the curated run does not replay on its own; nothing written", file=sys.stderr)
+            shutil.rmtree(work, ignore_errors=True)
+            return 1
     if args.record and not record_demo(work):
         print("the recorded run does not replay on its own; nothing written", file=sys.stderr)
         shutil.rmtree(work, ignore_errors=True)

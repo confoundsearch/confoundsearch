@@ -40,6 +40,8 @@ from confoundsearch.data.cache import (
 )
 from confoundsearch.data.corpus import Corpus, InMemoryCorpus
 from confoundsearch.data.demo import (
+    CURATED_CONFOUNDS,
+    CURATED_SEARCH,
     DEMO_QUESTION,
     PREWARMED_NOTE,
     RECORDED_MODEL,
@@ -271,6 +273,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="deterministic policy: how many confounds to ask for",
     )
     llm.add_argument(
+        "--queries",
+        type=int,
+        default=3,
+        metavar="N",
+        help="deterministic: searches per confound and variable, plainest wording first (default 3; "
+        "at most (synonyms + 1) squared pairs exist)",
+    )
+    llm.add_argument(
         "--synonyms",
         type=int,
         metavar="N",
@@ -381,13 +391,18 @@ def build_parser() -> argparse.ArgumentParser:
     demo.add_argument("--api-key", help="default: $OPENAI_API_KEY (with --openrouter: $OPENROUTER_API_KEY)")
     demo.add_argument("--openrouter", action="store_true", help="use OpenRouter")
     demo.add_argument("--out", type=Path, default=Path("confoundsearch-demo.html"))
-    demo.add_argument("--confounds", type=int, default=4, metavar="N", help="how many confounds to look for")
+    demo.add_argument(
+        "--confounds",
+        type=int,
+        metavar="N",
+        help="how many confounds to look for (default: 3, the curated example's; 4 with --live)",
+    )
     demo.add_argument("--max-budget", type=float, default=1.0, metavar="USD", help="stop at about this cost")
     demo.add_argument("--no-open", action="store_true", help="write the page but do not open it")
     demo.add_argument(
-        "--offline",
+        "--live",
         action="store_true",
-        help="search only the shipped example papers: no internet needed for the searches",
+        help="search the real sources instead of the shipped example papers",
     )
 
     expand = commands.add_parser(
@@ -598,6 +613,7 @@ def describe_run(args: argparse.Namespace) -> dict[str, Any]:
         "policy": args.policy,
         "confounds": args.confounds,
         "synonyms": synonym_count(args),
+        "queries": args.queries,
         "max_steps": args.max_steps,
         "max_budget": args.max_budget,
         "cache": None if args.no_cache else str(args.cache_dir or cache_dir()),
@@ -639,6 +655,7 @@ def deterministic_policy(args: argparse.Namespace, client: ChatClient) -> Determ
         LLMSynonyms(client, synonym_count(args)),
         max_confounds=args.confounds,
         synonyms_per_term=synonym_count(args),
+        queries_per_side=args.queries,
     )
 
 
@@ -700,26 +717,24 @@ def demo_model(args: argparse.Namespace) -> str | None:
 
 
 def demo(args: argparse.Namespace) -> int:
-    """Run the demo papers through `run`, so the demo is the real program on a small known question."""
+    """Run the example question through `run`: the curated example, or the real sources with --live."""
     model = demo_model(args)
-    replay = model is None and not args.offline
-    if model is None and not replay:
+    replay = model is None  # no key: replay the recorded run, which needs no model
+    if replay:
         print(
-            "error: no language model key found; run `confoundsearch setup` first (or set OPENAI_API_KEY)",
-            file=sys.stderr,
-        )
-        return 1
-    if replay:  # no key: replay the recorded example run, which needs no model and no internet
-        print(
-            "No language model key found, so this replays the recorded example run (its searches and the\n"
-            "model's answers ship with the package). To run it live, add a key: `confoundsearch setup`.\n",
+            "No language model key found, so this replays the recorded example run (the model's answers\n"
+            "ship with the package). To run it live, add a key: `confoundsearch setup`.\n",
             file=sys.stderr,
         )
         model = RECORDED_MODEL
-    argv = ["run", *(["--corpus", "demo"] if args.offline else []), "--model", str(model)]
-    argv += ["--corpus", "semanticscholar,openalex", "--replay"] if replay else []
-    argv += ["--iv", DEMO_IV, "--dv", DEMO_DV]
-    argv += ["--confounds", str(args.confounds), "--max-budget", str(args.max_budget), "--out", str(args.out)]
+    argv = ["run", "--model", str(model), "--iv", DEMO_IV, "--dv", DEMO_DV]
+    if not args.live:
+        argv += ["--corpus", "demo", *CURATED_SEARCH]  # the shipped example papers: no internet needed
+    elif replay:
+        argv += ["--corpus", "semanticscholar,openalex"]  # the sources whose searches ship saved
+    argv += ["--replay"] if replay else []
+    confounds = args.confounds or (4 if args.live else len(CURATED_CONFOUNDS))
+    argv += ["--confounds", str(confounds), "--max-budget", str(args.max_budget), "--out", str(args.out)]
     for flag, value in (("--base-url", args.base_url), ("--api-key", args.api_key)):
         argv += [flag, value] if value else []
     argv += ["--openrouter"] if args.openrouter else []
@@ -913,11 +928,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.log or args.out.with_name(f"{args.out.stem}.log.jsonl"), echo=args.status
         )
         runlog.event("run_started", **describe_run(args))
-        uses_cache = not args.no_cache and any(n not in ("file", "demo") for n in corpus_names(args))
-        warmed = seed_demo_cache(args.cache_dir or cache_dir(), (args.iv, args.dv)) if uses_cache else None
-        if warmed:  # the built-in example question: say plainly that its searches are already saved
+        warmed = None if args.no_cache else seed_demo_cache(args.cache_dir or cache_dir(), (args.iv, args.dv))
+        if warmed:  # the built-in example question starts with its saved model answers (and searches)
             runlog.event("prewarmed_cache", state=warmed)
-            print(f"{PREWARMED_NOTE}\n", file=sys.stderr)
+            if any(
+                n not in ("file", "demo") for n in corpus_names(args)
+            ):  # searched live: say they are saved
+                print(f"{PREWARMED_NOTE}\n", file=sys.stderr)
     if args.command == "setup":
         return setup(args)
     if args.command == "flush":

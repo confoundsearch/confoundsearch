@@ -51,11 +51,17 @@ class TestTheShippedFile:
         assert all(text.strip() and title.strip() and id_ for _, id_, title, text in rows)
         assert len({key for key, *_ in rows}) == len(rows)
 
-    def test_it_holds_the_question_and_its_usual_confounds(self):
-        assert DEMO_QUESTION == ("Organizational structure", "Firm performance")
-        corpus = DemoCorpus()
-        for confound in ("firm size", "IT investment", "environmental uncertainty"):
-            assert corpus.search(f"{confound} firm performance", 5), confound
+    def test_the_example_set_holds_every_known_study_and_some_distractors(self):
+        db = sqlite3.connect(f"{DEMO_FILE.resolve().as_uri()}?mode=ro", uri=True)
+        try:
+            keys = {k for (k,) in db.execute("SELECT key FROM example_papers")}
+            titles = dict(db.execute("SELECT key, title FROM papers").fetchall())
+        finally:
+            db.close()
+        builder = load_builder()
+        known = {builder.title_key(t) for t in builder.KNOWN_STUDIES}
+        assert len(keys) == 40 and known <= keys  # the ten known studies, padded out with thirty others
+        assert all(k in titles for k in keys)
 
 
 class TestDemoCorpus:
@@ -298,14 +304,20 @@ class TestThePrewarmedCache:
         from tests.test_cli import fake_backend
 
         monkeypatch.setattr(cli, "build_backend", fake_backend(env))
-        for more, kwargs in [
-            ((), {"iv": "IT investment"}),
-            (("--no-cache",), {}),
-            (("--corpus", "demo"), {}),
-        ]:
+        for more, kwargs in [((), {"iv": "IT investment"}), (("--no-cache",), {})]:
             assert cli.main(self.run_args(tmp_path, *more, **kwargs)) == 0
             assert "pre-warmed" not in capsys.readouterr().err
-        assert not (tmp_path / "data").exists()
+        assert not (tmp_path / "data").exists()  # nothing was copied in
+
+    def test_the_shipped_example_is_copied_in_quietly_when_the_papers_are_the_shipped_ones(
+        self, tmp_path, monkeypatch, capsys, env
+    ):
+        from tests.test_cli import fake_backend
+
+        monkeypatch.setattr(cli, "build_backend", fake_backend(env))
+        assert cli.main(self.run_args(tmp_path, "--corpus", "demo")) == 0
+        assert "pre-warmed" not in capsys.readouterr().err  # the curated note is the demo command's to print
+        assert database_path(tmp_path / "data", DEMO_QUESTION).is_file()  # but the saved answers are there
 
     def test_the_note_never_goes_to_standard_output(self, tmp_path, monkeypatch, capsys, env):
         from tests.test_cli import fake_backend
@@ -375,10 +387,11 @@ class TestTheDemoCommand:
 
     def test_the_defaults_are_a_short_example_run(self):
         args = self.parse()
-        assert (args.out, args.confounds, args.max_budget, args.no_open) == (
+        assert (args.out, args.confounds, args.max_budget, args.no_open, args.live) == (
             Path("confoundsearch-demo.html"),
-            4,
+            None,  # 3 for the curated example, 4 with --live
             1.0,
+            False,
             False,
         )
 
@@ -398,32 +411,45 @@ class TestTheDemoCommand:
         monkeypatch.setenv("OPENAI_API_KEY", "k")
         assert cli.demo_model(self.parse("--openrouter")) == "openai/gpt-4.1-mini"
 
-    def test_offline_without_any_key_it_says_what_to_do(self, capsys):
-        assert cli.main(["demo", "--offline"]) == 1
-        assert "confoundsearch setup" in capsys.readouterr().err
-
-    def test_it_is_a_run_of_the_example_question_on_the_usual_sources(self, monkeypatch, tmp_path):
+    def test_by_default_it_is_the_curated_example_on_the_shipped_papers(self, monkeypatch, tmp_path, capsys):
         monkeypatch.setenv("OPENAI_API_KEY", "k")
         seen = []
         real = cli.main
         monkeypatch.setattr(cli, "main", lambda argv=None: seen.append(list(argv)) or 0)
-        assert real(["demo", "--out", str(tmp_path / "d.html"), "--confounds", "3"]) == 0
+        assert real(["demo", "--out", str(tmp_path / "d.html")]) == 0
+        (argv,) = seen
+        assert argv[:5] == ["run", "--model", "gpt-4.1-mini", "--iv", "Organizational structure"]
+        assert argv[argv.index("--corpus") + 1] == "demo"  # the shipped example papers: no internet
+        assert (
+            argv[argv.index("--confounds") + 1] == "3" and "--replay" not in argv
+        )  # a key: it can ask live too
+        assert (
+            argv[argv.index("--dv") + 1] == "Firm performance"
+            and argv[argv.index("--max-budget") + 1] == "1.0"
+        )
+        assert argv[-1] == "--review"  # opens the result
+        said = " ".join(capsys.readouterr().err.split())
+        assert "curated example" not in said and "stub" not in said
+
+    def test_live_searches_the_usual_sources_and_asks_for_four_confounds(self, monkeypatch, tmp_path, capsys):
+        monkeypatch.setenv("OPENAI_API_KEY", "k")
+        seen = []
+        real = cli.main
+        monkeypatch.setattr(cli, "main", lambda argv=None: seen.append(list(argv)) or 0)
+        assert real(["demo", "--live", "--out", str(tmp_path / "d.html"), "--no-open"]) == 0
         (argv,) = seen
         assert (
-            argv[:3] == ["run", "--model", "gpt-4.1-mini"] and "--corpus" not in argv
+            "--corpus" not in argv and argv[argv.index("--confounds") + 1] == "4"
         )  # its cache is pre-warmed
-        assert argv[argv.index("--iv") + 1] == "Organizational structure"
-        assert argv[argv.index("--dv") + 1] == "Firm performance"
-        assert argv[argv.index("--confounds") + 1] == "3" and argv[argv.index("--max-budget") + 1] == "1.0"
-        assert argv[-1] == "--review"  # opens the result
+        assert "curated" not in capsys.readouterr().err  # no curated note: these are real searches
 
-    def test_offline_searches_only_the_shipped_papers(self, monkeypatch):
+    def test_the_number_of_confounds_can_be_chosen(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "k")
         seen = []
         real = cli.main
         monkeypatch.setattr(cli, "main", lambda argv=None: seen.append(list(argv)) or 0)
-        real(["demo", "--offline", "--no-open"])
-        assert seen[0][:5] == ["run", "--corpus", "demo", "--model", "gpt-4.1-mini"]
+        real(["demo", "--confounds", "5", "--no-open"])
+        assert seen[0][seen[0].index("--confounds") + 1] == "5"
 
     def test_options_for_the_model_and_not_opening_are_passed_on(self, monkeypatch):
         seen = []
@@ -612,9 +638,19 @@ class TestTheShippedRecording:
         assert cli.main(["demo", "--no-open", "--out", str(tmp_path / "d.html")]) == 0
         captured = capsys.readouterr()
         said = " ".join(captured.err.split())
-        assert "No language model key found" in said and "pre-warmed cache" in said
+        assert "No language model key found" in said and "curated example" not in said
         assert "model calls were answered from saved replies, at no cost" in captured.out
         assert (tmp_path / "d.html").exists() and (tmp_path / "d.audit.jsonl").exists()
+
+    def test_the_curated_demo_finds_and_supports_a_known_study(self, tmp_path):
+        """The point of the curated example: well-known studies show up as accepted evidence."""
+        from confoundsearch.logic.audit import AuditTrail
+
+        assert cli.main(["demo", "--no-open", "--out", str(tmp_path / "d.html")]) == 0
+        text = AuditTrail.load(tmp_path / "d.audit.jsonl").to_markdown()
+        assert "market competition" in text and "The Flattening Firm and Product Market Competition" in text
+        assert "accepted at step" in text
+        assert "Managing with Style: The Effect of Managers on Firm Policies" in text  # CEO style, too
 
     def test_its_audit_trail_is_intact_and_says_the_answers_were_replays(self, tmp_path):
         cli.main(self.argv(tmp_path, "--replay"))
@@ -623,3 +659,145 @@ class TestTheShippedRecording:
         trail = AuditTrail.load(tmp_path / "p.audit.jsonl")
         assert trail.intact and trail.complete
         assert "model calls were answered from saved replies, not asked afresh." in trail.to_markdown()
+
+
+class TestTheExampleSet:
+    def database(self, tmp_path, example):
+        path = tmp_path / "d.sqlite3"
+        db = PaperDatabase(path)
+        db.save(
+            "s",
+            "q",
+            3,
+            [
+                Passage("1", "managers and style at the firm", "On Style"),
+                Passage("2", "firms and competition in markets", "On Competition"),
+                Passage("3", "something else about weather", "Weather"),
+            ],
+        )
+        if example:
+            con = sqlite3.connect(path)
+            con.executemany("INSERT INTO example_papers VALUES (?)", [(k,) for k in example])
+            con.commit()
+            con.close()
+        return path
+
+    def test_with_an_example_set_only_those_papers_are_searched(self, tmp_path):
+        path = self.database(tmp_path, ["on style"])
+        assert [p.id for p in DemoCorpus(path).search("style competition", 5)] == ["1"]
+
+    def test_without_one_every_paper_is_searched(self, tmp_path):
+        path = self.database(tmp_path, [])
+        assert sorted(p.id for p in DemoCorpus(path).search("style competition", 5)) == ["1", "2"]
+
+    def test_a_file_from_before_example_sets_still_works(self, tmp_path):
+        path = tmp_path / "old.sqlite3"
+        con = sqlite3.connect(path)
+        con.execute("CREATE TABLE papers (key TEXT PRIMARY KEY, id TEXT, title TEXT, url TEXT, text TEXT)")
+        con.execute("INSERT INTO papers VALUES ('k', '9', 'T', 'u', 'firm text')")
+        con.commit()
+        con.close()
+        assert [p.id for p in DemoCorpus(path).search("firm", 5)] == ["9"]  # no example_papers table at all
+
+
+class TestCurating:
+    def paper(self, title, text="an abstract about firms and structure"):
+        return Passage(title[:6].replace(" ", ""), text, title, "u")
+
+    def test_it_adds_the_known_studies_and_pads_the_set_with_other_papers(self, tmp_path, monkeypatch):
+        builder = load_builder()
+        path = tmp_path / "d.sqlite3"
+        others = [
+            Passage(f"o{i}", f"organizational structure study number {i}", f"Other study {i}")
+            for i in range(40)
+        ]
+        PaperDatabase(path).save("s", "q", 40, others)
+
+        class Source:
+            def search(self, title, k):
+                return [self_.paper(title, "abstract mentioning x@example.org here")]
+
+        self_ = self
+        size = builder.curate(path, Source(), distractors=5)
+        assert size == len(builder.KNOWN_STUDIES) + 5
+        con = sqlite3.connect(path)
+        try:
+            keys = {k for (k,) in con.execute("SELECT key FROM example_papers")}
+            text = con.execute(
+                "SELECT text FROM papers WHERE title = ?", (builder.KNOWN_STUDIES[0],)
+            ).fetchone()[0]
+        finally:
+            con.close()
+        assert {builder.title_key(t) for t in builder.KNOWN_STUDIES} <= keys
+        assert "@" not in text  # emails are scrubbed from these abstracts too
+        assert curate_twice(builder, path, Source(), size) == size  # running it again changes nothing
+
+    def test_a_study_the_source_cannot_find_stops_the_build(self, tmp_path):
+        builder = load_builder()
+        PaperDatabase(tmp_path / "d.sqlite3").save("s", "q", 1, [Passage("1", "x", "T")])
+
+        class Nothing:
+            def search(self, title, k):
+                return []
+
+        with pytest.raises(RemoteError, match="could not find the known study"):
+            builder.curate(tmp_path / "d.sqlite3", Nothing())
+
+    def test_the_curated_confounds_are_saved_as_the_models_answer_to_the_very_prompt_a_run_sends(
+        self, tmp_path
+    ):
+        builder = load_builder()
+        from confoundsearch.data.cache import call_key
+        from confoundsearch.data.demo import CURATED_CONFOUNDS
+        from confoundsearch.model.llm import LLMConfounds
+
+        builder.save_curated_confounds(tmp_path)
+        sent = []
+
+        class Spy:
+            model, temperature = RECORDED_MODEL, 0.0
+
+            def chat(self, messages):
+                sent.append(list(messages))
+                return "unused"
+
+        LLMConfounds(Spy(), len(CURATED_CONFOUNDS))(*DEMO_QUESTION)
+        saved = PaperDatabase(database_path(tmp_path, DEMO_QUESTION)).load_call(
+            call_key(RECORDED_MODEL, 0.0, sent[0])
+        )
+        assert json.loads(saved) == {"confounds": list(CURATED_CONFOUNDS)}
+
+    def test_recording_a_curated_run_reads_the_file_being_built_and_asks_for_three(
+        self, tmp_path, monkeypatch
+    ):
+        builder = load_builder()
+        seen = []
+
+        def main(argv=None):
+            argv = list(argv)
+            seen.append((argv, cli.DemoCorpus().path))  # which file would the run read?
+            Path(argv[argv.index("--log") + 1]).write_text(json.dumps({"event": "step"}) + "\n")
+            return 0
+
+        monkeypatch.setattr(cli, "main", main)
+        assert builder.record_demo(tmp_path, curated=True) is True
+        argv, path = seen[0]
+        assert argv[argv.index("--corpus") + 1] == "demo" and argv[argv.index("--confounds") + 1] == "3"
+        assert path == database_path(tmp_path, DEMO_QUESTION)  # the work file, not the shipped one
+        assert cli.DemoCorpus is DemoCorpus  # and the real corpus is put back
+
+    def test_with_curate_the_build_stops_if_the_curated_run_does_not_replay(self, tmp_path, monkeypatch):
+        builder = load_builder()
+        monkeypatch.setattr(builder, "SemanticScholarCorpus", lambda *a, **k: Stub())
+        monkeypatch.setattr(builder, "OpenAlexCorpus", lambda *a, **k: Stub())
+        monkeypatch.setattr(builder, "curate", lambda db, source: 40)
+        monkeypatch.setattr(builder, "record_demo", lambda work, curated=False: curated)
+        good = tmp_path / "good.sqlite3"
+        assert builder.main(["--out", str(good), "--curate"]) == 0 and good.exists()
+        monkeypatch.setattr(builder, "record_demo", lambda work, curated=False: False)
+        bad = tmp_path / "bad.sqlite3"
+        assert builder.main(["--out", str(bad), "--curate"]) == 1 and not bad.exists()
+
+
+def curate_twice(builder, path, source, size):
+    return builder.curate(path, source, distractors=5)

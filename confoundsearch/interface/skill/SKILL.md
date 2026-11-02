@@ -28,9 +28,9 @@ initiative: it spends the user's money.
      server. The model name always goes in `--model`;
    - papers: by default the hosted index, which needs `ES_URL` and `ES_API_KEY`. Alternatives are
      `--corpus semanticscholar` (a free key in `S2_KEY` lifts the rate limit), `--corpus openalex`, or
-     `--corpus-file passages.jsonl`. To try the tool quickly, `confoundsearch demo` runs the built-in example question (organizational structure and firm
-     performance) from saved searches and saved model answers: it takes about a second, costs nothing and needs no keys.
-     `--offline` (or `--corpus demo`) searches only the papers shipped with the package. With no `--corpus`, every source that is set up is searched and merged.
+     `--corpus-file passages.jsonl`. To try the tool quickly, `confoundsearch demo` runs a curated example (organizational structure and firm
+     performance) on a small set of papers shipped with the package, with saved model answers: it takes about a second,
+     costs nothing and needs no keys. `--live` runs the same question on the real sources. With no `--corpus`, every source that is set up is searched and merged.
    Variables can live in a `.env` file in the working directory.
 3. If something is missing, tell the user exactly which variable to set in `.env` and stop.
    **Never ask the user to paste a key into the chat, and never echo one.**
@@ -52,7 +52,7 @@ confoundsearch run --json --model gpt-4.1 \
 ```
 
 Standard output is a single JSON document and nothing else; progress and errors go to standard error. Add
-`--confounds N` to look for more or fewer confounds (default 8), and `--max-budget USD` to stop once the language model has cost about
+`--confounds N` to look for more or fewer confounds (default 8), `--queries N` and `--synonyms N` to search more wordings of each pair (default 3 and 3; slower, more thorough), and `--max-budget USD` to stop once the language model has cost about
 that much (an estimate from the tokens used; a run usually costs under $1). The default plan has no randomness: the same answers
 from the model give the same run (a hosted model may still answer differently). Searches are saved in a data directory (the system's temporary folder, or `$CONFOUNDSEARCH_CACHE`), so a repeated search is
 answered from disk (one database per independent/dependent variable pair); `confoundsearch flush` empties that folder

@@ -11,6 +11,7 @@ The file is a saved-searches database (`confoundsearch.data.cache`) built by `de
 
 from __future__ import annotations
 
+import contextlib
 import math
 import shutil
 import sqlite3
@@ -29,6 +30,12 @@ PREWARMED_NOTE = (
     "instantly and for free. That is to show what a fast run looks like. It is a stub: any other question,\n"
     "or another model, runs live and takes longer."
 )
+CURATED_SEARCH = ("--queries", "25", "--synonyms", "8")  # the curated run searches many wordings
+CURATED_CONFOUNDS = (
+    "IT intensity",
+    "CEO style",
+    "market competition",
+)  # the confounds the curated demo asks about
 STOPWORDS = frozenset(
     (  # noqa: SIM905  (one string is easier to read and extend)
         "a an and are as at be by for from has have how in is it its of on or that the their this to was "
@@ -59,7 +66,16 @@ class DemoCorpus:
                 f"{self.path.resolve().as_uri()}?mode=ro", uri=True
             )  # installs may be read-only
             try:
-                rows = db.execute("SELECT id, text, title, url FROM papers ORDER BY key").fetchall()
+                rows = []
+                with contextlib.suppress(
+                    sqlite3.OperationalError
+                ):  # no example set in this file: use every paper
+                    rows = db.execute(
+                        "SELECT p.id, p.text, p.title, p.url FROM papers p "
+                        "JOIN example_papers e ON e.key = p.key ORDER BY p.key"
+                    ).fetchall()
+                if not rows:
+                    rows = db.execute("SELECT id, text, title, url FROM papers ORDER BY key").fetchall()
             except sqlite3.Error as err:
                 raise CorpusError(f"the demo papers could not be read: {err}") from err
             finally:
