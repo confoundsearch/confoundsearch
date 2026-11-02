@@ -50,8 +50,6 @@ def test_readme_has_the_expected_sections():
         "How to setup API keys",
         "Data directory",
         "To inspect, modify, or fork ConfoundSearch",
-        "What's in this code base?",
-        "Other key directories",
     ]
 
 

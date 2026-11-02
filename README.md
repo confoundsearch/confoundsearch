@@ -25,7 +25,7 @@ The demo runs in about a second without any setup. We recommend trying out the d
 When you are ready to run your own queries:
 
 ```bash
-confoundsearch setup              # 3. save your keys in a .env file (language model, Semantic Scholar)
+confoundsearch setup              # 3. save your keys in a .env file (language model, Semantic Scholar). See below for more.
 confoundsearch install-skill      # 4. optional: add the Claude skill
 
 # A run can be slow; we are working to reduce latency. We suggest a tmux/screen session or side terminal.
@@ -49,7 +49,7 @@ unfamiliar, [this page](https://github.com/theskumar/python-dotenv#readme) expla
 | --- | --- | --- |
 | `OPENROUTER_API_KEY` or `OPENAI_API_KEY` | [OpenRouter](https://openrouter.ai/keys) sells access to hundreds of models from many providers behind one key; [OpenAI](https://platform.openai.com/api-keys): [here is how to get started with the OpenAI API](https://platform.openai.com/docs/quickstart) if that is unfamiliar | The agent reads each paper's abstract and judges whether it supports a causal claim, so every run makes model calls. Any OpenAI-compatible model works (`--model`). |
 
-You need one language-model key to run your own questions. (The demo works without it.)
+You need one language-model key to run your own questions. (The demo works without it.) Technical users who want to run a locally hosted model should set `OPENAI_BASE_URL` to its address (for example `http://localhost:8000/v1`, or pass `--base-url`); a local model needs no key.
 
 ### Strongly recommended keys
 
@@ -57,19 +57,19 @@ You need one language-model key to run your own questions. (The demo works witho
 | --- | --- | --- |
 | `S2_KEY` | [Semantic Scholar](https://www.semanticscholar.org/product/api) is a free academic search index run by the Allen Institute for AI; the key is free | Everything runs faster. Without a key you share a rate limit with every anonymous user, so searches get refused (HTTP 429) and runs slow down or stop early. |
 | `OPENALEX_API_KEY` or `OPENALEX_EMAIL` | [OpenAlex](https://openalex.org/settings/api) is a free, open index of scholarly papers run by the nonprofit OurResearch; the key needs a free account | Runs faster. A key or an email puts you in OpenAlex's faster, more reliable pool, so searches finish sooner and fewer fail. |
-| `OPENAI_API_KEY` (for embeddings) | The same [OpenAI key](https://platform.openai.com/api-keys) as above. Its embedding models turn text into numbers, so similar meanings sit close together | Finds related keywords by meaning (say, "head count" for "firm size"), even for a phrase ConfoundSearch has never seen. Set it even if the agent uses a different model. |
+| `OPENAI_API_KEY` (for embeddings) | The same [OpenAI key](https://platform.openai.com/api-keys) as above | ConfoundSearch uses OpenAI embeddings for [query expansion](https://en.wikipedia.org/wiki/Query_expansion), among other methods. If you set this key, it makes a (cheap) call to the OpenAI embeddings API to get vectors for your keywords, to find similar query terms. This is optional but helpful. Set it even if the agent uses a different model. |
 
-A run usually costs well under $1 in model fees. Runs really cost a few cents if that. However, if you are concerned, `--max-budget USD` stops at a given dollar limit.
+Most ConfoundSearch runs cost a few cents. If you are concerned, `--max-budget USD` stops at a given dollar limit.
 
 ## Data directory
 
-As it searches, ConfoundSearch downloads papers and saves them, and the language model's answers, in a *data directory*, a folder on your computer,
+As it searches, ConfoundSearch downloads papers and saves them in a *data directory*, a folder on your computer,
 so the same search is never made twice. This is a common
 pattern. For example, [Transformers](https://huggingface.co/docs/transformers) keeps models in a [folder set by `HF_HOME`](https://huggingface.co/docs/hub/local-cache). We use one small [SQLite](https://www.sqlite.org/about.html)
 file per question (pair of independent and dependent variable).
 
-**Default location.** By default the data directory lives in your [temporary folder](https://en.wikipedia.org/wiki/Temporary_folder) (`/tmp/confoundsearch-<you>` on Linux), which your
-computer clears from time to time (Mac and Linux: after a restart or a few days; Windows: only if its automatic clean-up is on). The cache can get flushed periodically and the tool will still run fine.
+**Default location.** By default the data directory lives in your [temporary folder](https://en.wikipedia.org/wiki/Temporary_folder), which your
+computer automatically clears from time to time. The cache can get flushed periodically and the tool will still run fine.
 
 **If you want a permanent cache.** If you don't want your cache to get flushed, set the [environment variable](https://en.wikipedia.org/wiki/Environment_variable) `CONFOUNDSEARCH_CACHE`, for example
 `CONFOUNDSEARCH_CACHE=~/confoundsearch-data`. `confoundsearch setup` asks for it and saves it in `.env`; `--cache-dir` sets it for one run.
@@ -82,7 +82,7 @@ computer clears from time to time (Mac and Linux: after a restart or a few days;
 
 ConfoundSearch is open-source software with a permissive MIT License. This section is for programmers interested in the underlying code.
 
-## What's in this code base?
+### What's in this code base?
 
 The application is divided into four layers, as described in the technical appendix. Each is one directory, and if you are
 curious about any of them, feel free to poke around:
@@ -92,7 +92,7 @@ curious about any of them, feel free to poke around:
 - **Language model** ([`confoundsearch/model/`](confoundsearch/model)): any OpenAI-compatible model, including OpenRouter.
 - **Interface** ([`confoundsearch/interface/`](confoundsearch/interface)): the web app, command line, JSON output and agent skill.
 
-## Other key directories
+### Other key directories
 
 - [`tests/`](tests): the unit tests, with 100% branch coverage. They also enforce the layer boundaries described in the technical appendix.
 - [`devops/`](devops): scripts for releasing, checking the package on every Python version, and publishing the anonymous review copy.
