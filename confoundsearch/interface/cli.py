@@ -254,7 +254,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     shared = argparse.ArgumentParser(add_help=False)
     llm = shared.add_argument_group("language model (any OpenAI-compatible endpoint)")
-    llm.add_argument("--model", required=True)
+    llm.add_argument(
+        "--model",
+        help=f"default: {RECORDED_MODEL}, or openai/{RECORDED_MODEL} with only an OpenRouter key "
+        "(any OpenAI-compatible model name works)",
+    )
     llm.add_argument("--base-url", help="default: $OPENAI_BASE_URL or https://api.openai.com/v1")
     llm.add_argument("--api-key", help="default: $OPENAI_API_KEY (with --openrouter: $OPENROUTER_API_KEY)")
     llm.add_argument(
@@ -939,6 +943,15 @@ def expand(args: argparse.Namespace) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     load_dotenv(Path.cwd() / ".env")  # before the parser reads its defaults from the environment
     args = build_parser().parse_args(argv)
+    if args.command in ("run", "serve") and args.model is None:
+        args.model = demo_model(args) or (RECORDED_MODEL if getattr(args, "replay", False) else None)
+        if args.model is None:
+            print(
+                "error: no --model given and no key found to choose one: set OPENAI_API_KEY (or "
+                "OPENROUTER_API_KEY) in a .env file (see `confoundsearch setup`), or pass --model",
+                file=sys.stderr,
+            )
+            return 1
     if args.command in ("run", "serve"):
         corpus_names(args)  # a bad --corpus fails now, before any work starts
     if args.command == "show":

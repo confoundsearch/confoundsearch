@@ -25,7 +25,7 @@ initiative: it spends the user's money.
 2. Check the settings exist **without printing them**:
    - an AI model: `OPENAI_API_KEY` is set; or `OPENROUTER_API_KEY` is set (it is used automatically when it is the only key;
      `--openrouter` forces it) and the model name is an OpenRouter slug such as `openai/gpt-4.1`; or `OPENAI_BASE_URL` points at a compatible
-     server. The model name always goes in `--model`;
+     server. Another model goes in `--model` (the default is the one `confoundsearch demo` uses);
    - papers: by default the hosted index, which needs `ES_URL` and `ES_API_KEY`. Alternatives are
      `--corpus semanticscholar` (a free key in `S2_KEY` lifts the rate limit), `--corpus openalex`, or
      `--corpus-file passages.jsonl`. To try the tool quickly, `confoundsearch demo` runs a curated example (organizational structure and firm

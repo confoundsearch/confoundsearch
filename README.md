@@ -31,8 +31,9 @@ confoundsearch install-skill      # 4. optional: add the Claude skill
 # A run can be slow; we are working to reduce latency. We suggest a tmux/screen session or side terminal.
 # 5A. in Claude Code:  /confoundsearch iv="Organizational structure" dv="Firm performance"
 # 5B. or run the package directly (it searches every source you have set up).
-# The command below uses qwen/qwen3-max on OpenRouter.
-confoundsearch run --model qwen/qwen3-max \
+# The command below uses a default OpenAI model. You can also use an open-weight model via OpenRouter with
+# the --model parameter, or run with your own self-hosted open-weight model (see below).
+confoundsearch run \
   --iv "Organizational structure" --dv "Firm performance" \
   --max-budget 1.00 --out results/org.html
 

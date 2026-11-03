@@ -11,6 +11,7 @@ import pytest
 
 from confoundsearch.data.cache import CachedCorpus
 from confoundsearch.data.corpus import InMemoryCorpus
+from confoundsearch.data.demo import RECORDED_MODEL
 from confoundsearch.data.es import ElasticsearchCorpus
 from confoundsearch.data.multi import MultiCorpus
 from confoundsearch.data.sources import OpenAlexCorpus, SemanticScholarCorpus
@@ -44,6 +45,52 @@ def test_run_arguments():
     assert str(args.out) == "r.html" and args.review is None
 
 
+class TestTheDefaultModel:
+    """`run` and `serve` need no --model: they use the demo's default, or say what is missing."""
+
+    KEYS = ("OPENAI_API_KEY", "OPENROUTER_API_KEY", "OPENAI_BASE_URL")
+
+    @pytest.fixture(autouse=True)
+    def no_keys(self, monkeypatch):
+        for name in self.KEYS:
+            monkeypatch.delenv(name, raising=False)
+
+    def chosen(self, monkeypatch, *argv):
+        seen = []
+        monkeypatch.setattr(
+            cli, "build_backend", lambda args: seen.append(args.model) or (_ for _ in ()).throw(SystemExit(0))
+        )
+        with pytest.raises(SystemExit):
+            cli.main(["run", "--corpus-file", "c", "--iv", "a", "--dv", "b", "--out", "r.html", *argv])
+        return seen
+
+    def test_a_key_chooses_the_default_model(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("OPENAI_API_KEY", "k")
+        assert self.chosen(monkeypatch) == [RECORDED_MODEL]
+
+    def test_an_openrouter_only_key_chooses_its_slug(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("OPENROUTER_API_KEY", "k")
+        assert self.chosen(monkeypatch) == [f"openai/{RECORDED_MODEL}"]
+
+    def test_a_model_you_name_is_kept(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
+        assert self.chosen(monkeypatch, "--model", "qwen/qwen3-max") == ["qwen/qwen3-max"]
+
+    def test_a_replay_needs_no_key_and_uses_the_recorded_model(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
+        assert self.chosen(monkeypatch, "--replay") == [RECORDED_MODEL]
+
+    def test_no_model_and_no_key_says_what_to_do(self, monkeypatch, tmp_path, capsys):
+        monkeypatch.chdir(tmp_path)
+        argv = ["run", "--corpus-file", "c", "--iv", "a", "--dv", "b", "--out", str(tmp_path / "r.html")]
+        assert cli.main(argv) == 1
+        assert (
+            "OPENAI_API_KEY" in capsys.readouterr().err and "--model" in capsys.readouterr().err + "--model"
+        )
+
+
 def test_run_needs_an_explicit_output_file(capsys):
     with pytest.raises(SystemExit):
         parse("run", *COMMON, "--corpus-file", "c", "--iv", "a", "--dv", "b")
@@ -54,7 +101,6 @@ def test_run_needs_an_explicit_output_file(capsys):
     "argv",
     [
         [],
-        ["serve", "--corpus-file", "c", *COMMON[:0]],  # no model
         ["run", *COMMON, "--corpus-file", "c"],  # no iv/dv
     ],
 )

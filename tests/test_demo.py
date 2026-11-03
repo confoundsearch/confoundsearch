@@ -292,10 +292,10 @@ class TestThePrewarmedCache:
         blocked.write_text("x")
         assert seed_demo_cache(blocked, DEMO_QUESTION, self.source(tmp_path)) is None
 
-    def test_the_note_is_polite_and_says_it_is_a_stub(self):
+    def test_the_note_says_the_demo_is_cached_and_other_queries_take_longer(self):
         flat = " ".join(PREWARMED_NOTE.split())
-        assert "pre-warmed cache" in flat and "stub" in flat and "instantly" in flat
-        assert "any other question" in PREWARMED_NOTE
+        assert "cached" in flat and "instantly" in flat and "For other queries, things take longer" in flat
+        assert "stub" not in flat and RECORDED_MODEL not in flat
 
     def run_args(self, tmp_path, *more, iv="Organizational structure", dv="Firm performance"):
         return [
@@ -310,12 +310,12 @@ class TestThePrewarmedCache:
 
         monkeypatch.setattr(cli, "build_backend", fake_backend(env))
         assert cli.main(self.run_args(tmp_path)) == 0
-        assert "pre-warmed cache" in " ".join(capsys.readouterr().err.split())  # the note wraps over lines
+        assert "has been cached" in " ".join(capsys.readouterr().err.split())  # the note wraps over lines
         assert database_path(tmp_path / "data", DEMO_QUESTION).is_file()
         events = [json.loads(line) for line in (tmp_path / "p.log.jsonl").read_text().splitlines()]
         assert [e["state"] for e in events if e["event"] == "prewarmed_cache"] == ["seeded"]
         assert cli.main(self.run_args(tmp_path)) == 0  # the second time it is already there; still said
-        assert "pre-warmed cache" in " ".join(capsys.readouterr().err.split())
+        assert "has been cached" in " ".join(capsys.readouterr().err.split())
 
     def test_no_note_for_other_questions_or_without_the_saved_searches(
         self, tmp_path, monkeypatch, capsys, env
@@ -325,7 +325,7 @@ class TestThePrewarmedCache:
         monkeypatch.setattr(cli, "build_backend", fake_backend(env))
         for more, kwargs in [((), {"iv": "IT investment"}), (("--no-cache",), {})]:
             assert cli.main(self.run_args(tmp_path, *more, **kwargs)) == 0
-            assert "pre-warmed" not in capsys.readouterr().err
+            assert "has been cached" not in capsys.readouterr().err
         assert not (tmp_path / "data").exists()  # nothing was copied in
 
     def test_the_shipped_example_is_copied_in_quietly_when_the_papers_are_the_shipped_ones(
@@ -335,7 +335,9 @@ class TestThePrewarmedCache:
 
         monkeypatch.setattr(cli, "build_backend", fake_backend(env))
         assert cli.main(self.run_args(tmp_path, "--corpus", "demo")) == 0
-        assert "pre-warmed" not in capsys.readouterr().err  # the curated note is the demo command's to print
+        assert (
+            "has been cached" not in capsys.readouterr().err
+        )  # the curated note is the demo command's to print
         assert database_path(tmp_path / "data", DEMO_QUESTION).is_file()  # but the saved answers are there
 
     def test_the_note_never_goes_to_standard_output(self, tmp_path, monkeypatch, capsys, env):
@@ -344,7 +346,7 @@ class TestThePrewarmedCache:
         monkeypatch.setattr(cli, "build_backend", fake_backend(env))
         cli.main([*self.run_args(tmp_path), "--json"])
         captured = capsys.readouterr()
-        assert json.loads(captured.out)["question"] and "pre-warmed" in " ".join(captured.err.split())
+        assert json.loads(captured.out)["question"] and "has been cached" in " ".join(captured.err.split())
 
 
 class TestTheShippedSavedSearches:
