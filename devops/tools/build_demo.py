@@ -173,6 +173,26 @@ def save_curated_confounds(work: Path) -> None:
     )
 
 
+def scrub_papers(path: Path) -> int:
+    """Remove emails from the saved papers. Returns how many papers changed.
+
+    A prompt carries a paper's text, so this must happen before the model's answers are recorded: scrub
+    afterwards and the saved prompts no longer match what a replay sends.
+    """
+    changed = 0
+    with contextlib.closing(sqlite3.connect(path)) as db:
+        try:
+            rows = db.execute("SELECT key, text, title FROM papers").fetchall()
+        except sqlite3.OperationalError:  # nothing has been saved yet
+            return 0
+        for key, text, title in rows:
+            if EMAIL.search(text) or EMAIL.search(title):
+                db.execute("UPDATE papers SET text=?, title=? WHERE key=?", (scrub(text), scrub(title), key))
+                changed += 1
+        db.commit()
+    return changed
+
+
 def record_demo(work: Path, passes: int = 5, curated: bool = False) -> bool:
     """Record the example run's model answers in `work`, and prove they replay with no model.
 
@@ -194,7 +214,7 @@ def record_demo(work: Path, passes: int = 5, curated: bool = False) -> bool:
         log = work / f"{name}.log.jsonl"
         argv = ["run", *corpus, "--model", RECORDED_MODEL, "--iv", iv, "--dv", dv]
         argv += [*(CURATED_SEARCH if curated else ()), "--confounds", str(confounds)]
-        argv += ["--cache-dir", str(work), "--max-budget", "0.5", *extra]
+        argv += ["--cache-dir", str(work), "--max-budget", "5", *extra]
         return cli.main([*argv, "--out", str(work / f"{name}.html"), "--log", str(log)]), log
 
     real = getattr(cli, "DemoCorpus")  # noqa: B009
@@ -203,8 +223,11 @@ def record_demo(work: Path, passes: int = 5, curated: bool = False) -> bool:
         for number in range(1, passes + 1):
             code, log = run(f"record-{number}")
             wait_for_writes()
-            print(f"  recording pass {number}: {fresh_work(log)} new", file=sys.stderr)
-            if code == 0 and fresh_work(log) == 0:
+            scrubbed_now = scrub_papers(db_path)  # a pass that scrubbed something must be run again
+            print(
+                f"  recording pass {number}: {fresh_work(log)} new, {scrubbed_now} scrubbed", file=sys.stderr
+            )
+            if code == 0 and fresh_work(log) == 0 and scrubbed_now == 0:
                 break
         else:
             return False
@@ -251,10 +274,13 @@ def clean(path: Path) -> tuple[int, int]:
     Returns (searches, papers). It counts with a plain connection: opening the file the way the cache does
     would switch it back to write-ahead mode, which is not what should ship.
     """
+    scrub_papers(path)
     with contextlib.closing(sqlite3.connect(path)) as db:
-        for key, text, title in db.execute("SELECT key, text, title FROM papers").fetchall():
-            if EMAIL.search(text) or EMAIL.search(title):
-                db.execute("UPDATE papers SET text=?, title=? WHERE key=?", (scrub(text), scrub(title), key))
+        for key, messages, reply in db.execute("SELECT key, messages, reply FROM model_calls").fetchall():
+            if EMAIL.search(messages) or EMAIL.search(
+                reply
+            ):  # recorded before the scrub: no replay can match it
+                db.execute("DELETE FROM model_calls WHERE key=?", (key,))
         db.commit()
         db.execute("PRAGMA journal_mode=DELETE")
         db.execute("VACUUM")
@@ -327,7 +353,7 @@ def main(argv: list[str] | None = None) -> int:
             cli.main(
                 [
                     *["run", "--corpus", "semanticscholar,openalex", "--model", model],
-                    *["--iv", iv, "--dv", dv, "--cache-dir", str(work), "--max-budget", "0.5"],
+                    *["--iv", iv, "--dv", dv, "--cache-dir", str(work), "--max-budget", "5"],
                     *["--confounds", str(confounds), "--out", str(work / f"run-{number}.html")],
                 ]
             )

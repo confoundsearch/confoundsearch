@@ -74,7 +74,7 @@ from confoundsearch.logic.policy import EpsilonGreedy, LookaheadQ, Policy
 from confoundsearch.logic.reward import phi
 from confoundsearch.logic.transition import Environment, Judge, TrustSynthesis
 from confoundsearch.model.embeddings import OpenAIEmbedder
-from confoundsearch.model.expansion import FIELDS, LLMMeasures, LLMMechanisms
+from confoundsearch.model.expansion import FIELDS, LLMAttributes, LLMMeasures, LLMMechanisms
 from confoundsearch.model.llm import (
     OPENROUTER_URL,
     ChatClient,
@@ -451,6 +451,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--per-mechanism", type=int, default=6, help="channels it works through asked for (0: none)"
     )
     expand.add_argument(
+        "--per-attribute", type=int, default=8, help="characteristics papers measure asked for (0: none)"
+    )
+    expand.add_argument(
         "--neighbor-top", type=int, default=100, help="how many of the best keywords to ask synonyms of"
     )
     expand.add_argument(
@@ -686,6 +689,7 @@ def deterministic_policy(args: argparse.Namespace, client: ChatClient) -> Determ
         synthesize=None if args.no_synthesis else LLMSynthesis(client),
         measures=None if args.no_synthesis or args.no_mechanisms else LLMMeasures(client),
         mechanisms=None if args.no_synthesis or args.no_mechanisms else LLMMechanisms(client),
+        attributes=None if args.no_synthesis or args.no_mechanisms else LLMAttributes(client),
     )
 
 
@@ -889,6 +893,7 @@ def expand(args: argparse.Namespace) -> int:
         max_seeds=args.max_seeds,
         per_hypernym=args.per_hypernym,
         per_mechanism=args.per_mechanism,
+        per_attribute=args.per_attribute,
         neighbor_top=args.neighbor_top,
         per_neighbor=args.per_neighbor,
     )

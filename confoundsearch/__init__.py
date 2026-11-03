@@ -38,7 +38,7 @@ from confoundsearch.logic.state import State
 from confoundsearch.logic.terms import Expansion, KeywordExpander, Term, expand_terms
 from confoundsearch.logic.transition import Environment, Judge, TrustSynthesis
 from confoundsearch.model.embeddings import OpenAIEmbedder
-from confoundsearch.model.expansion import LLMMeasures, LLMMechanisms, LLMTermVariants
+from confoundsearch.model.expansion import LLMAttributes, LLMMeasures, LLMMechanisms, LLMTermVariants
 from confoundsearch.model.llm import (
     LLMConfounds,
     LLMJudge,
@@ -79,6 +79,7 @@ __all__ = [
     "KeywordIndex",
     "KeywordNotFound",
     "KeywordService",
+    "LLMAttributes",
     "LLMConfounds",
     "LLMError",
     "LLMJudge",

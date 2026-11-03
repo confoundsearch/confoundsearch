@@ -259,6 +259,8 @@ class Model:
             return json.dumps({"hypernyms": {term: [f"{term} category"] for term in listed}})
         if "channels or mechanisms" in question:
             return terms("delegation channel", "shared proxy")
+        if "observable attributes" in question:
+            return terms("tenure", "shared proxy")
         if "stand-in" in question:  # a field question
             field = question.split("papers in ")[1].split(" use for it")[0]
             return terms(f"{field} proxy", "shared proxy")
@@ -347,6 +349,7 @@ class TestWideNet:
             ("finance proxy category", "hypernym"),
             ("finance proxy alias", "variant synonym"),
             ("delegation channel", "mechanism"),
+            ("tenure", "attribute"),
         ]
         assert net.problems == []
 
@@ -354,7 +357,13 @@ class TestWideNet:
         from confoundsearch.model.expansion import LLMWideNet
 
         net = LLMWideNet(Model(fail=["stand-in"]), rounds=1, fields=("finance",))
-        assert [kind for _, kind in net("firm size")] == ["synonym", "synonym", "hypernym", "mechanism"]
+        assert [kind for _, kind in net("firm size")] == [
+            "synonym",
+            "synonym",
+            "hypernym",
+            "mechanism",
+            "attribute",
+        ]
         assert len(net.problems) == 1 and net.problems[0].startswith("field variants: cannot answer")
 
     def test_all_stages_failing_is_an_error_that_names_them(self):
@@ -374,10 +383,20 @@ class TestWideNet:
         pairs = LLMWideNet(Model(), rounds=1, fields=(), per_hypernym=0)("firm size")
         assert ("delegation channel", "mechanism") in pairs
 
+    def test_it_asks_for_the_characteristics_papers_measure_and_marks_them(self):
+        from confoundsearch.model.expansion import LLMWideNet
+
+        pairs = LLMWideNet(Model(), rounds=1, fields=(), per_hypernym=0, per_mechanism=0)("firm size")
+        assert ("tenure", "attribute") in pairs
+        none = LLMWideNet(Model(), rounds=1, fields=(), per_hypernym=0, per_mechanism=0, per_attribute=0)
+        assert ("tenure", "attribute") not in none("firm size")
+
     def test_a_failing_mechanisms_stage_is_noted_and_skipped(self):
         from confoundsearch.model.expansion import LLMWideNet
 
-        net = LLMWideNet(Model(fail=["channels or mechanisms"]), rounds=1, fields=(), per_hypernym=0)
+        net = LLMWideNet(
+            Model(fail=["channels or mechanisms"]), rounds=1, fields=(), per_hypernym=0, per_attribute=0
+        )
         assert [k for _, k in net("firm size")] == ["synonym", "synonym"]
         assert net.problems and net.problems[0].startswith("mechanisms:")
 
@@ -385,24 +404,32 @@ class TestWideNet:
         from confoundsearch.model.expansion import LLMWideNet
 
         model = Model()
-        kinds = [k for _, k in LLMWideNet(model, rounds=1, fields=(), per_mechanism=0)("firm size")]
+        kinds = [
+            k
+            for _, k in LLMWideNet(model, rounds=1, fields=(), per_mechanism=0, per_attribute=0)("firm size")
+        ]
         assert kinds == ["synonym", "synonym", "hypernym"] and len(model.asked) == 2
         model = Model()
         kinds = [
-            k for _, k in LLMWideNet(model, rounds=1, fields=(), per_hypernym=0, per_mechanism=0)("firm size")
+            k
+            for _, k in LLMWideNet(
+                model, rounds=1, fields=(), per_hypernym=0, per_mechanism=0, per_attribute=0
+            )("firm size")
         ]
         assert kinds == ["synonym", "synonym"] and len(model.asked) == 1
         model = Model()
         kinds = [
             k
-            for _, k in LLMWideNet(model, rounds=1, fields=("finance",), per_variant=0, per_mechanism=0)(
-                "firm size"
-            )
+            for _, k in LLMWideNet(
+                model, rounds=1, fields=("finance",), per_variant=0, per_mechanism=0, per_attribute=0
+            )("firm size")
         ]
         assert kinds == ["synonym", "synonym", "variant", "hypernym", "hypernym"]
         assert len(model.asked) == 3  # no synonym questions
         model = Model()
-        LLMWideNet(model, rounds=1, fields=("finance",), per_field=0, per_mechanism=0)("firm size")
+        LLMWideNet(model, rounds=1, fields=("finance",), per_field=0, per_mechanism=0, per_attribute=0)(
+            "firm size"
+        )
         assert len(model.asked) == 2  # the angles and the construct's hypernyms
 
 
@@ -650,6 +677,7 @@ class TestBuildExpander:
             fields=(),
             per_hypernym=0,
             per_mechanism=0,
+            per_attribute=0,
             per_neighbor=0,
         ).expand("firm size")
         assert len(model.asked) == 2 and all("A setting." in q and "up to 3" in q for q in model.asked)
@@ -673,6 +701,15 @@ class TestMeasuresAndMechanisms:
         assert 'could "CEO style" affect "organizational structure"?' in model.asked[0]
         LLMMechanisms(model, 2)("CEO style")
         assert 'could "CEO style" work?' in model.asked[1]
+
+
+class TestAttributes:
+    def test_attributes_are_asked_for_by_name_and_cleaned(self):
+        from confoundsearch.model.expansion import LLMAttributes
+
+        model = FakeReply('{"terms": ["CEO tenure", "ceo tenure", "CEO style", "functional background"]}')
+        assert LLMAttributes(model, 3)("CEO style") == ["CEO tenure", "functional background"]
+        assert 'of "CEO style"' in model.asked[0] and "List 3" in model.asked[0]
 
 
 class FakeReply:

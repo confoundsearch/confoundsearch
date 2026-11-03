@@ -113,6 +113,27 @@ class LLMMechanisms:
         )
 
 
+class LLMAttributes:
+    """The observable attributes or characteristics of a construct that papers use as explanatory variables.
+
+    Not its synonyms and not its kinds: for "CEO style", things like "educational background" or "tenure". A
+    paper on how such a construct matters often names the attribute it measured, not the construct's label.
+    """
+
+    def __init__(self, client: ChatClient, count: int = 8) -> None:
+        self.client, self.count = client, count
+
+    def __call__(self, construct: str) -> list[str]:
+        prompt = (
+            f'In empirical papers, which specific, observable attributes or characteristics of "{construct}" '
+            f"are used as explanatory variables? List {self.count}, 1 to 4 words each. "
+            'Reply with JSON only: {"terms": ["..."]}'
+        )
+        return clean(
+            _strings(self.client.chat([{"role": "user", "content": prompt}]), "terms"), {normalize(construct)}
+        )
+
+
 FIELDS = (
     "economics",
     "finance",
@@ -265,9 +286,10 @@ class LLMWideNet:
     3. `LLMHypernyms`: broader terms for the construct and for each of those field variants.
     4. `LLMTermSynonyms`: other names for each of those field variants.
     5. `LLMMechanisms`: the specific channels the construct works through (papers name these, not the label).
+    6. `LLMAttributes`: the observable characteristics papers use as variables (for "CEO style": "tenure").
 
-    It returns (term, kind) pairs, with kinds "synonym", "variant", "hypernym", "variant synonym" and
-    "mechanism", so that
+    It returns (term, kind) pairs, with kinds "synonym", "variant", "hypernym", "variant synonym", "mechanism"
+    and "attribute", so that
     where every term came from survives into the result. A stage that fails is skipped and noted in
     `problems`; if all fail, that is an error.
     """
@@ -284,6 +306,7 @@ class LLMWideNet:
         workers: int = 4,
         per_hypernym: int = 3,
         per_mechanism: int = 6,
+        per_attribute: int = 8,
     ) -> None:
         self.angles = LLMTermVariants(client, rounds, per_round, context)
         self.variants = LLMFieldVariants(client, fields, per_field, context, workers)
@@ -293,6 +316,8 @@ class LLMWideNet:
         self.use_hypernyms = per_hypernym > 0
         self.mechanisms = LLMMechanisms(client, per_mechanism)
         self.use_mechanisms = per_mechanism > 0
+        self.attributes = LLMAttributes(client, per_attribute)
+        self.use_attributes = per_attribute > 0
         self.problems: list[str] = []
 
     def __call__(self, construct: str) -> list[tuple[str, str]]:
@@ -320,6 +345,8 @@ class LLMWideNet:
             stage("synonyms of the variants", "variant synonym", lambda: self.synonyms(variants))
         if self.use_mechanisms:
             stage("mechanisms", "mechanism", lambda: self.mechanisms(construct))
+        if self.use_attributes:
+            stage("attributes", "attribute", lambda: self.attributes(construct))
         if not pairs and self.problems:
             raise LLMError("; ".join(self.problems))
         return pairs

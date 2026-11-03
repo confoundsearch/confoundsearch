@@ -291,7 +291,7 @@ class TestSynthesis:
 class TestSecondPhase:
     """With measures and mechanisms: more searches in papers' own words, before the synthesis reads all."""
 
-    def policy(self, measures=None, mechanisms=None, **options):
+    def policy(self, measures=None, mechanisms=None, attributes=None, **options):
         seen = []
 
         def synthesize(x, y, confounds, passages):
@@ -304,6 +304,7 @@ class TestSecondPhase:
             synthesize=synthesize,
             measures=measures,
             mechanisms=mechanisms,
+            attributes=attributes,
             **options,
         )
         return policy, seen
@@ -327,6 +328,19 @@ class TestSecondPhase:
             "firm size profit",
         ]
         assert len(seen) == 1  # and still one reading, after all of them
+
+    def test_it_searches_the_attributes_alone_and_with_the_first_measures_of_each_variable(self):
+        measures = lambda term: ["span", "levels", "forms"]  # noqa: E731
+        attributes = lambda confound: ["tenure", "background"]  # noqa: E731
+        policy, _ = self.policy(measures, lambda c, v: [], attributes=attributes, attribute_measures=2)
+        trajectory, _ = play(policy)
+        queries = self.queries(trajectory)[2:]
+        assert queries[:2] == ["tenure", "background"]  # alone, once
+        crossed = [q for q in queries if q.split()[0] in ("tenure", "background") and len(q.split()) > 1]
+        assert sorted(set(crossed)) == sorted(
+            f"{a} {m}" for a in ("tenure", "background") for m in ("span", "levels")
+        )  # only the first two measures, for each variable's list
+        assert "tenure forms" not in queries
 
     def test_the_same_search_is_not_made_twice(self):
         policy, _ = self.policy(lambda term: ["head count", "Head Count"], lambda c, v: [])

@@ -13,9 +13,10 @@ give the same run. In order:
      judge decides which really support the link; an edge nobody supports is still reported, as unsupported.
 4. Stop.
 
-With `synthesize` the order changes: every confound is added and searched first, then (with `measures` and
-`mechanisms`) a second round of searches uses the words papers use for what the constructs are made of and how
-they act: the measures of each variable, and the mechanisms by which each confound could act on each variable.
+With `synthesize` the order changes: every confound is added and searched first, then (with `measures`,
+`mechanisms` and `attributes`) a second round of searches uses the words papers use for what the constructs
+are made of and how they act: the measures of each variable, the mechanisms by which each confound could act
+on each variable, and the observable attributes of each confound (alone, and with the first few measures).
 Then one synthesis reads all that was retrieved and says, by meaning rather than by exact words, which
 passages support which links. Only those become edges and attached passages; the environment's judge is
 asked about each (`TrustSynthesis` accepts them, so the synthesis has the last word). If the synthesis cannot
@@ -40,9 +41,8 @@ Synonyms = Callable[[str], Sequence[str]]  # term -> other ways to say it
 Synthesize = Callable[[str, str, Sequence[str], Sequence[Passage]], Sequence[Tuple[str, Target, str]]]
 # (x, y, confounds, passages) -> (confound, "X" or "Y", passage id) for each passage that supports a link
 Measures = Callable[[str], Sequence[str]]  # variable -> the specific measures or forms papers name for it
-Mechanisms = Callable[
-    [str, str], Sequence[str]
-]  # (confound, variable) -> channels by which it could act on it
+Mechanisms = Callable[[str, str], Sequence[str]]  # (confound, variable) -> channels it could act through
+Attributes = Callable[[str], Sequence[str]]  # confound -> the observable characteristics papers measure
 
 Script = Generator[Action, State, None]
 Steps = Generator[Action, State, State]  # a part of the plan; it hands back the state it ended in
@@ -72,9 +72,12 @@ class DeterministicPolicy:
         synthesize: Synthesize | None = None,
         measures: Measures | None = None,
         mechanisms: Mechanisms | None = None,
+        attributes: Attributes | None = None,
+        attribute_measures: int = 4,
     ) -> None:
         self.ask, self.synonyms, self.synthesize = ask, synonyms, synthesize
         self.measures, self.mechanisms = measures, mechanisms
+        self.attributes, self.attribute_measures = attributes, attribute_measures
         self.max_confounds, self.synonyms_per_term = max_confounds, synonyms_per_term
         self.queries_per_side, self.results_per_query = queries_per_side, results_per_query
         self.attach_per_side = attach_per_side
@@ -132,9 +135,13 @@ class DeterministicPolicy:
         measured = {variable: self._asked_for(self.measures, variable) for _, variable in sides}
         for name, own in added:
             queries: list[str] = []
+            attributes = self._asked_for(self.attributes, name)
+            queries += attributes  # a paper may name the attribute it measured, not the confound
             for _, variable in sides:
                 queries += self._asked_for(self.mechanisms, name, variable)
                 queries += [f"{own[0]} {measure}" for measure in measured[variable]]
+                for measure in measured[variable][: self.attribute_measures]:
+                    queries += [f"{attribute} {measure}" for attribute in attributes]
             for query in distinct(queries):
                 state = yield Retrieve(query, self.results_per_query)
         return state

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from confoundsearch.data.cache import CachedCorpus, PaperDatabase, database_path
+from confoundsearch.data.cache import CachedCorpus, PaperDatabase, database_path, wait_for_writes
 from confoundsearch.data.demo import (
     DEMO_FILE,
     DEMO_QUESTION,
@@ -30,7 +30,7 @@ ROOT = Path(__file__).parent.parent
 
 class TestTheShippedFile:
     def test_it_is_there_and_is_a_plain_saved_searches_database(self):
-        assert DEMO_FILE.is_file() and DEMO_FILE.stat().st_size < 6_000_000
+        assert DEMO_FILE.is_file() and DEMO_FILE.stat().st_size < 12_000_000
         db = sqlite3.connect(
             f"{DEMO_FILE.resolve().as_uri()}?mode=ro", uri=True
         )  # never write to the shipped file
@@ -235,6 +235,24 @@ class TestTheBuilder:
             "@" not in text + title and mode == "delete"
         )
 
+    def test_scrubbing_papers_counts_them_and_clean_drops_answers_recorded_before_it(self, tmp_path):
+        builder = load_builder()
+        at = "@"
+        path = tmp_path / "d.sqlite3"
+        database = PaperDatabase(path)
+        database.save("s", "q", 3, [Passage("1", f"mail x{at}example.org", "T", "u")])
+        database.save_call("old", "m", [{"role": "user", "content": f"x{at}example.org"}], "yes")
+        database.save_call("new", "m", [{"role": "user", "content": "no address"}], "yes")
+        wait_for_writes()
+        assert builder.scrub_papers(path) == 1 and builder.scrub_papers(path) == 0
+        builder.clean(path)
+        db = sqlite3.connect(path)
+        try:
+            kept = [row[0] for row in db.execute("SELECT key FROM model_calls")]
+        finally:
+            db.close()
+        assert kept == ["new"]
+
 
 class TestThePrewarmedCache:
     def source(self, tmp_path):
@@ -352,7 +370,7 @@ class TestTheShippedSavedSearches:
             searches = db.execute("SELECT COUNT(*) FROM searches").fetchone()[0]
         finally:
             db.close()
-        assert DEMO_FILE.stat().st_size < 6_000_000 and searches >= 200
+        assert DEMO_FILE.stat().st_size < 12_000_000 and searches >= 200
 
 
 class TestScrubbing:
