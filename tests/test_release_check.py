@@ -140,7 +140,7 @@ class TestScan:
             ("a link " + rc.SESSION + "/abc", "contains a session link"),
         ],
     )
-    def test_it_finds_what_identifies_a_person(self, text, expected):
+    def test_it_finds_what_points_to_a_person(self, text, expected):
         assert [expected in f for f in rc.scan_text("f", text)] == [True]
 
     @pytest.mark.parametrize(
@@ -227,7 +227,7 @@ class TestDist:
         dist = build_dist(tmp_path / "dist", wheel_files=[*rc.REQUIRED_IN_WHEEL, "tests/test_a.py"])
         assert "the wheel contains tests/test_a.py" in rc.check_dist(dist, "1.2.3")
 
-    def test_anything_that_identifies_a_person_inside_the_files_is_refused(self, tmp_path):
+    def test_anything_that_points_to_a_person_inside_the_files_is_refused(self, tmp_path):
         dist = build_dist(
             tmp_path / "dist", text="contact me@" + "university.edu or github.com/" + "someone/repo"
         )

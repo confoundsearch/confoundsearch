@@ -30,6 +30,7 @@ def build_expander(
     per_variant: int = 4,
     max_seeds: int = 150,
     per_hypernym: int = 3,
+    per_mechanism: int = 6,
     neighbor_top: int = 100,
     per_neighbor: int = 2,
 ) -> KeywordExpander:
@@ -39,13 +40,22 @@ def build_expander(
     The model is asked the five ways, then once per field in `fields` (what that field calls the idea or uses
     as a stand-in for it), then for synonyms of those field terms. Empty `fields` or a zero `per_field` skips
     the field steps, and a zero `per_variant` skips their synonyms. `per_hypernym` asks for broader terms (0:
-    none). Of the `neighbor_top` best keywords found, the model is asked for `per_neighbor` other names each
+    none) and `per_mechanism` for the channels it works through (0: none).
+    Of the `neighbor_top` best keywords found, the model is asked for `per_neighbor` other names each
     (either zero: none). It first asks the service how many
     neighbours one answer may hold, and never asks for more.
     """
     service.learn_limits()
     net = LLMWideNet(
-        client, rounds, per_round, fields, per_field, per_variant, context, per_hypernym=per_hypernym
+        client,
+        rounds,
+        per_round,
+        fields,
+        per_field,
+        per_variant,
+        context,
+        per_hypernym=per_hypernym,
+        per_mechanism=per_mechanism,
     )
     hop = LLMTermSynonyms(client, per_neighbor) if per_neighbor > 0 else None
     return KeywordExpander(

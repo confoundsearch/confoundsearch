@@ -220,3 +220,140 @@ class TestWhatTheModelSays:
 )
 def test_distinct_keeps_each_string_once_in_order(texts, limit, expected):
     assert distinct(texts, limit) == expected
+
+
+class TestSynthesis:
+    """With a synthesis: search every confound first, then one reading of what came back picks the links."""
+
+    def policy(self, supports, **options):
+        calls = []
+
+        def synthesize(x, y, confounds, passages):
+            calls.append((x, y, list(confounds), [p.id for p in passages]))
+            return supports
+
+        policy = DeterministicPolicy(
+            ask_for("firm size", "firm age"),
+            synonyms_of({"firm size": ["head count"]}),
+            synthesize=synthesize,
+            **options,
+        )
+        return policy, calls
+
+    def test_everything_is_searched_before_it_reads_once_and_then_the_links_are_made(self):
+        policy, calls = self.policy([("firm size", "X", "s1"), ("firm age", "Y", "a1")])
+        trajectory, _ = play(policy)
+        order = kinds(trajectory)
+        assert order.index("AddEdge") > max(i for i, k in enumerate(order) if k == "Retrieve")
+        assert len(calls) == 1 and calls[0][:3] == (X, Y, ["firm size", "firm age"])
+        assert "s2" in calls[0][3]  # it reads all that was retrieved, whether or not it uses the words
+        graph = trajectory.final.graph
+        assert {p.id for p in graph.passages("firm size", "X")} == {"s1"}
+        assert {p.id for p in graph.passages("firm age", "Y")} == {"a1"}
+        assert not graph.has_edge("firm size", "Y")  # no word-match edge: only what it supported
+
+    def test_it_reads_the_passages_in_a_fixed_order_so_the_same_run_asks_the_same_question(self):
+        policy, calls = self.policy([])
+        play(policy)
+        assert calls[0][3] == sorted(calls[0][3])
+
+    def test_a_passage_that_uses_other_words_can_be_the_evidence(self):
+        policy, _ = self.policy([("firm age", "X", "s2")])  # s2 is about firm size, not age
+        trajectory, _ = play(policy)
+        assert {p.id for p in trajectory.final.graph.passages("firm age", "X")} == {"s2"}
+
+    def test_it_attaches_no_more_than_the_limit_per_side_and_the_judge_still_decides(self):
+        supports = [("firm size", "X", "s1"), ("firm size", "X", "s3"), ("firm size", "X", "a1")]
+        policy, _ = self.policy(supports, attach_per_side=2)
+        trajectory, _ = play(policy, accepted={"s1"})
+        attached = [s.action.passage_id for s in trajectory.steps if isinstance(s.action, AttachPassage)]
+        assert attached == ["s1", "s3"]
+        assert {p.id for p in trajectory.final.graph.passages("firm size", "X")} == {"s1"}
+
+    def test_nothing_supported_means_no_edges(self):
+        policy, _ = self.policy([])
+        trajectory, _ = play(policy)
+        assert "AddEdge" not in kinds(trajectory)
+
+    def test_if_the_model_cannot_be_reached_it_falls_back_to_the_words(self):
+        def broken(*args):
+            raise RemoteError("down")
+
+        policy = DeterministicPolicy(
+            ask_for("firm size", "firm age"), synonyms_of({"firm size": ["head count"]}), synthesize=broken
+        )
+        trajectory, _ = play(policy)
+        graph = trajectory.final.graph
+        assert {p.id for p in graph.passages("firm size", "X")} >= {"s1"}
+        assert graph.has_edge("firm age", "X") and not graph.has_edge("firm age", "Y")
+
+
+class TestSecondPhase:
+    """With measures and mechanisms: more searches in papers' own words, before the synthesis reads all."""
+
+    def policy(self, measures=None, mechanisms=None, **options):
+        seen = []
+
+        def synthesize(x, y, confounds, passages):
+            seen.append([p.id for p in passages])
+            return []
+
+        policy = DeterministicPolicy(
+            ask_for("firm size"),
+            synonyms_of({}),
+            synthesize=synthesize,
+            measures=measures,
+            mechanisms=mechanisms,
+            **options,
+        )
+        return policy, seen
+
+    def queries(self, trajectory):
+        return [s.action.query for s in trajectory.steps if isinstance(s.action, Retrieve)]
+
+    def test_it_searches_each_mechanism_alone_and_the_confound_with_each_measure(self):
+        measures = lambda term: ["head count", "span"] if term == X else ["profit"]  # noqa: E731
+        mechanisms = lambda confound, variable: [f"{variable} channel"]  # noqa: E731
+        policy, seen = self.policy(measures, mechanisms)
+        trajectory, _ = play(policy)
+        queries = self.queries(trajectory)
+        first = queries[:2]  # the plain round: the one pairing for each side
+        assert all(q.startswith("firm size") for q in first)
+        assert queries[2:] == [
+            f"{X} channel",
+            "firm size head count",
+            "firm size span",
+            f"{Y} channel",
+            "firm size profit",
+        ]
+        assert len(seen) == 1  # and still one reading, after all of them
+
+    def test_the_same_search_is_not_made_twice(self):
+        policy, _ = self.policy(lambda term: ["head count", "Head Count"], lambda c, v: [])
+        trajectory, _ = play(policy)
+        assert self.queries(trajectory).count("firm size head count") == 1
+
+    def test_without_either_step_nothing_more_is_searched(self):
+        policy, _ = self.policy()
+        trajectory, _ = play(policy)
+        assert len(self.queries(trajectory)) == 2
+
+    def test_if_the_model_cannot_be_reached_the_plain_searches_are_kept(self):
+        def broken(*args):
+            raise RemoteError("down")
+
+        policy, _ = self.policy(broken, broken)
+        trajectory, _ = play(policy)
+        assert len(self.queries(trajectory)) == 2 and trajectory.steps[-1].action == Stop()
+
+    def test_what_is_not_text_is_ignored(self):
+        policy, _ = self.policy(lambda term: [3, None, "span"], lambda c, v: [])
+        trajectory, _ = play(policy)
+        assert self.queries(trajectory)[2:] == ["firm size span"]
+
+    def test_it_only_happens_with_the_synthesis(self):
+        policy = DeterministicPolicy(
+            ask_for("firm size"), synonyms_of({}), measures=lambda t: ["span"], mechanisms=lambda c, v: ["x"]
+        )
+        trajectory, _ = play(policy)
+        assert len(self.queries(trajectory)) == 2

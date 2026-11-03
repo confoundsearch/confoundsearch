@@ -46,8 +46,9 @@ class Neighbor(Protocol):
 @dataclass(frozen=True)
 class Term:
     text: str
-    # "construct"; "synonym", "variant", "hypernym" or "variant synonym" (from the model, and which of its
-    # steps); "neighbor" (from the vector index); or "neighbor synonym" (the model, for those neighbors)
+    # "construct"; "synonym", "variant", "hypernym", "variant synonym" or "mechanism" (from the model, and
+    # which of its steps); "neighbor" (from the vector index); or "neighbor synonym" (the model, for those
+    # neighbors)
     kind: str
     score: float | None = None  # a neighbor's best similarity to any of the terms that brought it up
     works: int | None = None  # papers that use the keyword, for a neighbor

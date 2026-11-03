@@ -206,7 +206,7 @@ def diagram(data: dict[str, Any], drawn: list[tuple[str, str]], counts: dict[str
     defs = marker.format(id="arrowhead", fill="#333") + marker.format(id="arrowhead-arc", fill="#888")
     defs += "".join("\n" + marker.format(id=f"arrow-md-{c[1:]}", fill=c) for _, c in drawn)
     parts = [
-        '<svg width="100%" height="auto" viewBox="0 0 640 480" style="background:white;display:block;margin:0 auto;'
+        '<svg width="100%" viewBox="0 0 640 480" style="background:white;display:block;margin:0 auto;'
         'max-width:620px;user-select:none;-webkit-user-select:none;" class="dag-svg" onclick="dagBackgroundClick()" >',
         f"<defs>{defs}\n</defs>",
     ]

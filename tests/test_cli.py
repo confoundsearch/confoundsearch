@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import runpy
 import sys
 from pathlib import Path
@@ -16,6 +17,7 @@ from confoundsearch.data.sources import OpenAlexCorpus, SemanticScholarCorpus
 from confoundsearch.interface import cli
 from confoundsearch.interface.server import RunManager
 from confoundsearch.logic.audit import AuditedClient, AuditLog, AuditTrail
+from confoundsearch.logic.transition import TrustSynthesis
 from confoundsearch.model.llm import LLMJudge, OpenAICompatibleClient, Proposer
 from tests.conftest import P1, P2, P3, StubJudge
 
@@ -85,8 +87,14 @@ def test_build_backend_with_a_jsonl_corpus(tmp_path):
     backend = cli.build_backend(args)
     env, proposer = backend.env, backend.proposer
     assert [p.id for p in env.corpus.search("larger firms", 5)] == ["p1", "p2"]
-    assert isinstance(env.judge, LLMJudge) and isinstance(proposer, Proposer)
-    audited = env.judge.client
+    assert isinstance(env.judge, TrustSynthesis) and isinstance(proposer, Proposer)  # the synthesis judges
+    kept = cli.build_backend(
+        parse(
+            "serve", *COMMON, "--corpus-file", str(write_corpus(tmp_path)), "--api-key", "k", "--no-synthesis"
+        )
+    )
+    assert isinstance(kept.env.judge, LLMJudge)
+    audited = backend.client
     assert isinstance(audited, AuditedClient)  # every model call goes into the run's audit trail
     client = audited.client.client.client  # announced, then cached, then the real client
     assert isinstance(client, OpenAICompatibleClient)
@@ -123,6 +131,11 @@ class ScriptedClient:
             return json.dumps({"confounds": ["firm size", "firm age"]})
         if '{"synonyms"' in prompt:
             return json.dumps({"synonyms": ["head count"] if "size" in prompt else []})
+        if "JSON lines only" in prompt:  # the synthesis: every passage supports "firm size" affecting X
+            ids = re.findall(r"^id: (.+)$", prompt, flags=re.M)
+            return "\n".join(
+                json.dumps({"confound": "firm size", "side": "X", "id": i, "quote": ""}) for i in ids
+            )
         return "yes"
 
 
@@ -750,9 +763,32 @@ class TestThePolicy:
         trail = self.run_default(tmp_path, monkeypatch, env, "--confounds", "1", "--synonyms", "0")
         settings = trail.of_kind("run_started")[0].data["policy_settings"]
         assert settings["max_confounds"] == 1 and settings["synonyms_per_term"] == 0
-        assert settings["queries_per_side"] == 3
+        assert settings["queries_per_side"] == 3 and settings["attach_per_side"] == cli.SYNTHESIS_ATTACH
         queries = [e.data["query"] for e in trail.of_kind("retrieved")]
         assert queries and all("firm size" in q for q in queries)  # only the one confound it was allowed
+
+    def test_the_default_run_reads_what_it_retrieved_by_meaning_and_no_synthesis_turns_that_off(
+        self, tmp_path, monkeypatch, env
+    ):
+        asked = lambda trail: [e.data["messages"][-1]["content"] for e in trail.of_kind("model_call")]  # noqa: E731
+        trail = self.run_default(tmp_path, monkeypatch, env, "--confounds", "1")
+        assert any("JSON lines only" in prompt for prompt in asked(trail))
+        trail = self.run_default(tmp_path, monkeypatch, env, "--confounds", "1", "--no-synthesis")
+        assert not any("JSON lines only" in prompt for prompt in asked(trail))
+
+    def test_the_second_phase_asks_for_measures_and_mechanisms_unless_switched_off(
+        self, tmp_path, monkeypatch, env
+    ):
+        asked = lambda trail: " ".join(e.data["messages"][-1]["content"] for e in trail.of_kind("model_call"))  # noqa: E731
+        on = asked(self.run_default(tmp_path, monkeypatch, env, "--confounds", "1"))
+        assert "channels or mechanisms" in on and "measures, forms or outcomes" in on
+        for flag in ("--no-mechanisms", "--no-synthesis"):
+            off = asked(self.run_default(tmp_path, monkeypatch, env, "--confounds", "1", flag))
+            assert "channels or mechanisms" not in off
+
+    def test_without_the_synthesis_it_cites_fewer_passages_per_link(self, tmp_path, monkeypatch, env):
+        trail = self.run_default(tmp_path, monkeypatch, env, "--confounds", "1", "--no-synthesis")
+        assert trail.of_kind("run_started")[0].data["policy_settings"]["attach_per_side"] == 4
 
     def test_queries_sets_how_many_searches_each_side_gets(self, tmp_path, monkeypatch, env):
         trail = self.run_default(tmp_path, monkeypatch, env, "--confounds", "1", "--queries", "5")

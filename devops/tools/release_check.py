@@ -98,7 +98,7 @@ def check_metadata(root: Path = ROOT) -> list[str]:
 
 
 def scan_text(label: str, text: str, blocklist: Iterable[re.Pattern[str]] = ()) -> list[str]:
-    """Anything in `text` that would identify a person: an owner, a real email, a session link, a name."""
+    """Anything in `text` that would point to a person: an owner, a real email, a session link, a name."""
     found = [f"{label}: names github.com/{o}" for o in OWNER.findall(text) if o not in ALLOWED_OWNERS]
     found += [
         f"{label}: email domain {d}" for d in EMAIL.findall(text) if not d.endswith(ALLOWED_EMAIL_DOMAINS)

@@ -23,7 +23,7 @@ from confoundsearch.logic.graph import Passage, normalize
 
 DEMO_FILE = Path(__file__).with_name("demo.sqlite3")
 DEMO_QUESTION = ("Organizational structure", "Firm performance")
-RECORDED_MODEL = "gpt-4.1-mini"  # the model whose answers are saved for the example question
+RECORDED_MODEL = "gpt-6-astra"  # the model whose answers are saved for the example question
 PREWARMED_NOTE = (
     "Note: this is the built-in example question. Its searches, and the answers of the default model\n"
     f"({RECORDED_MODEL}), are already saved (a pre-warmed cache) in your data directory, so those come back\n"

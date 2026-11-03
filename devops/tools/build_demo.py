@@ -154,12 +154,12 @@ def save_curated_confounds(work: Path) -> None:
 
     This is the curation: the key is made from the very prompt a run sends, so the run finds this answer.
     """
-    from confoundsearch.model.llm import LLMConfounds
+    from confoundsearch.model.llm import LLMConfounds, temperature_for
 
     sent: list[list[dict[str, str]]] = []
 
     class Ask:
-        model, temperature = RECORDED_MODEL, 0.0
+        model, temperature = RECORDED_MODEL, temperature_for(RECORDED_MODEL)
 
         def chat(self, messages: Sequence[Mapping[str, str]]) -> str:
             sent.append([dict(m) for m in messages])
@@ -169,7 +169,7 @@ def save_curated_confounds(work: Path) -> None:
     LLMConfounds(Ask(), len(CURATED_CONFOUNDS))(iv, dv)
     reply = json.dumps({"confounds": list(CURATED_CONFOUNDS)})
     PaperDatabase(database_path(work, DEMO_QUESTION)).save_call(
-        call_key(RECORDED_MODEL, 0.0, sent[0]), RECORDED_MODEL, sent[0], reply
+        call_key(RECORDED_MODEL, temperature_for(RECORDED_MODEL), sent[0]), RECORDED_MODEL, sent[0], reply
     )
 
 

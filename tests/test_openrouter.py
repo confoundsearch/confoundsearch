@@ -146,7 +146,7 @@ class TestTheContract:
         client(server).chat([{"role": "user", "content": "hi"}])
         assert server.requests[0]["headers"]["http-referer"] == "https://example.org/app"
         assert server.requests[0]["headers"]["x-title"] == "My study"
-        assert "http-referer" not in server.requests[1]["headers"]  # nothing identifying is sent by default
+        assert "http-referer" not in server.requests[1]["headers"]  # nothing personal is sent by default
 
     def test_extra_headers_cannot_replace_the_key(self, stub):
         server = stub()
@@ -324,7 +324,7 @@ class TestTheCommandLine:
         )
         monkeypatch.setattr(cli, "make_server", lambda *a, **k: Server())
         cli.main(["serve", "--model", SLUG, "--openrouter", "--corpus-file", str(DEMO)])
-        audited = seen[0].env.judge.client
+        audited = seen[0].client
         assert isinstance(audited, AuditedClient) and audited.client.client.client.api_key == KEY
 
 
@@ -354,7 +354,7 @@ class TestAWholeRun:
         out = tmp_path / "result.html"
         argv = ["run", "--json", "--openrouter", "--base-url", server.url, "--model", SLUG]
         argv += ["--corpus-file", str(DEMO), "--iv", "IT investment", "--dv", "firm performance"]
-        argv += ["--max-steps", "80", "--seed", "1", "--out", str(out)]
+        argv += ["--max-steps", "80", "--seed", "1", "--no-synthesis", "--out", str(out)]
         assert cli.main(argv) == 0
         printed = capsys.readouterr().out
         result = json.loads(printed)

@@ -22,12 +22,12 @@ for path in ${SNAPSHOT_EXCLUDE:-}; do rm -rf "${dest:?}/$path"; done  # left out
 
 if [ -n "$blocklist" ]; then
   if grep -rInEf "$blocklist" "$dest"; then
-    echo "identifying text found in the snapshot (see above); fix it and commit, then try again" >&2
+    echo "personal text found in the snapshot (see above); fix it and commit, then try again" >&2
     rm -rf "$dest"
     exit 1
   fi
   if (cd "$dest" && find . -type f | grep -Ef "$blocklist"); then
-    echo "identifying text found in a file name (see above); rename the file and commit, then try again" >&2
+    echo "personal text found in a file name (see above); rename the file and commit, then try again" >&2
     rm -rf "$dest"
     exit 1
   fi

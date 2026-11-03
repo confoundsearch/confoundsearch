@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import ClassVar
 
 import pytest
 
@@ -11,6 +12,7 @@ from confoundsearch import (
     LLMError,
     LLMJudge,
     LLMProposer,
+    LLMSynthesis,
     Merge,
     OpenAICompatibleClient,
     Passage,
@@ -22,7 +24,7 @@ from confoundsearch import (
 )
 from confoundsearch.errors import RemoteError
 from confoundsearch.http import urllib_transport
-from confoundsearch.model.llm import DEFAULT_BASE_URL
+from confoundsearch.model.llm import DEFAULT_BASE_URL, temperature_for
 
 
 def completion(text: str) -> bytes:
@@ -333,3 +335,71 @@ class TestProposer:
     def test_proposer_is_silent_when_done_and_does_not_call_the_llm(self):
         client = FakeClient()
         assert Proposer(LLMProposer(client)).propose(self.S.stopped()) == [] and client.seen == []
+
+
+class TestSynthesis:
+    PASSAGES: ClassVar[list] = [
+        Passage("p1", "Managers shape policies.", "Managing"),
+        Passage("p2", "Rivals cut prices.", "Rivalry"),
+    ]
+
+    def line(self, **fields):
+        return json.dumps({"confound": "CEO style", "side": "Y", "id": "p1", "quote": "q", **fields})
+
+    def read(self, *replies, passages=None, batch=40):
+        client = FakeClient(*replies)
+        synthesis = LLMSynthesis(client, batch)
+        return synthesis(
+            "X", "Y", ["CEO style", "market competition"], self.PASSAGES if passages is None else passages
+        ), client
+
+    def test_it_reads_json_lines_and_keeps_the_candidates_own_spelling(self):
+        reply = "\n".join([self.line(), self.line(confound="Market Competition", side="X", id="p2")])
+        found, client = self.read(reply)
+        assert found == [("CEO style", "Y", "p1"), ("market competition", "X", "p2")]
+        prompt = client.seen[0][0]["content"]
+        assert (
+            "id: p1" in prompt and "title: Managing" in prompt and "CEO style, market competition" in prompt
+        )
+
+    def test_it_drops_anything_it_cannot_check(self):
+        reply = "\n".join(
+            [
+                "```json",
+                "not json",
+                self.line(id="made-up"),  # a passage that was never retrieved
+                self.line(confound="age"),  # a confound nobody proposed
+                self.line(side="Z"),
+                self.line(confound=7),
+                json.dumps({"confound": "CEO style"}),  # missing fields
+                json.dumps([1]),  # not an object
+                self.line(),
+                self.line(),  # said twice
+                "```",
+            ]
+        )
+        found, _ = self.read(reply)
+        assert found == [("CEO style", "Y", "p1")]
+
+    def test_a_long_list_is_read_in_batches_and_each_passage_is_offered_once(self):
+        found, client = self.read(self.line(), self.line(confound="market competition", id="p2"), batch=1)
+        assert found == [("CEO style", "Y", "p1"), ("market competition", "Y", "p2")]
+        assert len(client.seen) == 2 and "id: p2" not in client.seen[0][0]["content"]
+
+    def test_nothing_to_read_asks_nothing(self):
+        found, client = self.read(passages=[], batch=1)
+        assert found == [] and client.seen == []
+
+
+@pytest.mark.parametrize(
+    "model, expected",
+    [
+        ("gpt-4.1-mini", 0.0),
+        ("openai/gpt-4.1", 0.0),
+        ("gpt-6-astra", None),
+        ("openai/gpt-5.4", None),
+        (None, 0.0),
+    ],
+)
+def test_the_newer_gpt_models_get_no_temperature(model, expected):
+    assert temperature_for(model) == expected

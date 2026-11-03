@@ -84,7 +84,7 @@ rebuild index:
     {{py}} devops/tools/keyword_vectors.py build --out keyword_vectors
     {{py}} devops/tools/keyword_vectors.py push --out keyword_vectors --index {{index}} --fresh --yes
 
-# Does the domain name you own identify you, is its DNS in Route 53, and does the service answer on it? Needs the internet.
+# Does the domain name you own reveal you, is its DNS in Route 53, and does the service answer on it? Needs the internet.
 check-domain domain host="":
     {{py}} devops/proxy/check_domain.py {{domain}} {{ if host != "" { "--host " + host } else { "" } }}
 

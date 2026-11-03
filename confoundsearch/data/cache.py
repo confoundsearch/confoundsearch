@@ -88,7 +88,7 @@ def cache_dir(environ: Mapping[str, str] | None = None) -> Path:
 
 
 def call_key(model: str | None, temperature: float | None, messages: Sequence[Mapping[str, str]]) -> str:
-    """What identifies a model call: the model, its temperature and the exact messages sent."""
+    """What makes a model call the same call: the model, its temperature and the exact messages sent."""
     asked = {"model": model, "temperature": temperature, "messages": [dict(m) for m in messages]}
     text = json.dumps(asked, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()

@@ -53,7 +53,7 @@ def paper_id(key: str, source: str, passage: Passage) -> str:
     """The same paper gets the same id from any search or source, so a graph never holds it twice."""
     if not title_key(passage.title):
         return f"{source}:{passage.id}"
-    return "p" + hashlib.sha1(key.encode()).hexdigest()[:10]  # noqa: S324 (an identifier, not security)
+    return "p" + hashlib.sha1(key.encode()).hexdigest()[:10]  # noqa: S324 (a short key, not security)
 
 
 class MultiCorpus:

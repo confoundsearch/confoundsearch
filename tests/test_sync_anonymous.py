@@ -123,7 +123,7 @@ def test_a_blocklist_hit_changes_nothing(source, dest, tmp_path):
     block = tmp_path / "block.txt"
     block.write_text("Jane Q\\. Researcher\n")
     result = sync(source, dest, env={"BLOCKLIST": str(block)})
-    assert result.returncode == 1 and "identifying text found" in result.stderr
+    assert result.returncode == 1 and "personal text found" in result.stderr
     assert (dest / "a.txt").read_text() == "one\n"  # the earlier copy is untouched
 
 
@@ -230,7 +230,7 @@ def test_the_usual_blocklist_is_used_when_none_is_named(source, dest, tmp_path):
     home.mkdir()
     (home / ".blocklist").write_text("Jane Q\\. Researcher\n")
     result = update(source, dest, env={"ASSUME_YES": "1", "HOME": str(home)})
-    assert result.returncode == 1 and "identifying text found" in result.stderr
+    assert result.returncode == 1 and "personal text found" in result.stderr
 
 
 @pytest.fixture

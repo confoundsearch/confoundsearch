@@ -129,6 +129,9 @@ class TestTheWrapper:
             cached(Model(temperature=None), tmp_path).temperature is None
         )  # a model left at its own default
         assert cached(None, tmp_path, model="m").temperature == 0.0  # a replay assumes the usual default
+        assert (
+            cached(None, tmp_path, model="gpt-6-astra").temperature is None
+        )  # or none, for models that need it
 
     def test_a_different_model_temperature_or_prompt_is_asked_afresh(self, tmp_path):
         inner = Model()

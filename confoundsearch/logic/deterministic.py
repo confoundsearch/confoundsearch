@@ -13,14 +13,22 @@ give the same run. In order:
      judge decides which really support the link; an edge nobody supports is still reported, as unsupported.
 4. Stop.
 
-The model is reached through two callables, so this layer never imports the model layer.
+With `synthesize` the order changes: every confound is added and searched first, then (with `measures` and
+`mechanisms`) a second round of searches uses the words papers use for what the constructs are made of and how
+they act: the measures of each variable, and the mechanisms by which each confound could act on each variable.
+Then one synthesis reads all that was retrieved and says, by meaning rather than by exact words, which
+passages support which links. Only those become edges and attached passages; the environment's judge is
+asked about each (`TrustSynthesis` accepts them, so the synthesis has the last word). If the synthesis cannot
+be reached, the word-for-word ranking above is used instead.
+
+The model is reached through callables, so this layer never imports the model layer.
 """
 
 from __future__ import annotations
 
 import re
 from collections.abc import Iterable
-from typing import Callable, Generator, Sequence
+from typing import Callable, Generator, Sequence, Tuple
 
 from confoundsearch.errors import RemoteError
 from confoundsearch.logic.actions import Action, AddConfound, AddEdge, AttachPassage, Retrieve, Stop
@@ -29,6 +37,12 @@ from confoundsearch.logic.state import State
 
 Ask = Callable[[str, str], Sequence[str]]  # (x, y) -> the confounds worth looking for
 Synonyms = Callable[[str], Sequence[str]]  # term -> other ways to say it
+Synthesize = Callable[[str, str, Sequence[str], Sequence[Passage]], Sequence[Tuple[str, Target, str]]]
+# (x, y, confounds, passages) -> (confound, "X" or "Y", passage id) for each passage that supports a link
+Measures = Callable[[str], Sequence[str]]  # variable -> the specific measures or forms papers name for it
+Mechanisms = Callable[
+    [str, str], Sequence[str]
+]  # (confound, variable) -> channels by which it could act on it
 
 Script = Generator[Action, State, None]
 Steps = Generator[Action, State, State]  # a part of the plan; it hands back the state it ended in
@@ -55,8 +69,12 @@ class DeterministicPolicy:
         queries_per_side: int = 3,
         results_per_query: int = 3,
         attach_per_side: int = 4,
+        synthesize: Synthesize | None = None,
+        measures: Measures | None = None,
+        mechanisms: Mechanisms | None = None,
     ) -> None:
-        self.ask, self.synonyms = ask, synonyms
+        self.ask, self.synonyms, self.synthesize = ask, synonyms, synthesize
+        self.measures, self.mechanisms = measures, mechanisms
         self.max_confounds, self.synonyms_per_term = max_confounds, synonyms_per_term
         self.queries_per_side, self.results_per_query = queries_per_side, results_per_query
         self.attach_per_side = attach_per_side
@@ -76,28 +94,93 @@ class DeterministicPolicy:
         names = [n for n in names if normalize(n) not in {normalize(x), normalize(y)}]
         phrasings = {term: self._phrasings(term) for term in distinct([x, y, *names])}
         taken: set[str] = set()
+        added: list[tuple[str, list[str]]] = []
+        sides: tuple[tuple[Target, str], tuple[Target, str]] = (("X", x), ("Y", y))
         for name in names:
             if normalize(name) in taken:
                 continue  # another confound already uses this very phrase
             own = [p for p in phrasings[name] if normalize(p) not in taken]  # the confound itself comes first
             taken |= {normalize(p) for p in own}
             state = yield AddConfound(name, frozenset(normalize(p) for p in own))
-            sides: tuple[tuple[Target, str], tuple[Target, str]] = (("X", x), ("Y", y))
+            added.append((name, own))
             for target, variable in sides:
-                state = yield from self._search_and_process(state, name, own, target, phrasings[variable])
+                if self.synthesize is None:
+                    state = yield from self._search_and_process(state, name, own, target, phrasings[variable])
+                else:
+                    state = yield from self._search(state, own, phrasings[variable])
+        if self.synthesize is not None:
+            state = yield from self._second_phase(state, x, y, added)
+            state = yield from self._synthesize_and_attach(state, x, y, added, phrasings)
         while True:
             state = yield Stop()
 
     def _search_and_process(
         self, state: State, name: str, strings: list[str], target: Target, variable: Sequence[str]
     ) -> Steps:
+        state = yield from self._search(state, strings, variable)
+        found = self._ranked(state.observed, strings, variable)
+        return (yield from self._attach(state, name, target, [passage.id for passage in found]))
+
+    def _search(self, state: State, strings: list[str], variable: Sequence[str]) -> Steps:
         for query in self._queries(strings, variable):
             state = yield Retrieve(query, self.results_per_query)
-        found = self._ranked(state.observed, strings, variable)
-        if found:
+        return state
+
+    def _second_phase(self, state: State, x: str, y: str, added: list[tuple[str, list[str]]]) -> Steps:
+        """More searches in papers' own words: a confound's mechanisms, and its name with each measure."""
+        sides = (("X", x), ("Y", y))
+        measured = {variable: self._asked_for(self.measures, variable) for _, variable in sides}
+        for name, own in added:
+            queries: list[str] = []
+            for _, variable in sides:
+                queries += self._asked_for(self.mechanisms, name, variable)
+                queries += [f"{own[0]} {measure}" for measure in measured[variable]]
+            for query in distinct(queries):
+                state = yield Retrieve(query, self.results_per_query)
+        return state
+
+    @staticmethod
+    def _asked_for(call: Callable[..., Sequence[str]] | None, *args: str) -> list[str]:
+        """What the model says, or nothing if there is no such step or the model cannot be reached."""
+        if call is None:
+            return []
+        try:
+            return [item for item in call(*args) if isinstance(item, str)]
+        except RemoteError:
+            return []
+
+    def _attach(self, state: State, name: str, target: Target, ids: list[str]) -> Steps:
+        """If anything was found: add the edge and cite the best `attach_per_side` passages for it."""
+        if ids:
             state = yield AddEdge(name, target)
-            for passage in found[: self.attach_per_side]:
-                state = yield AttachPassage(name, target, passage.id)
+            for ident in ids[: self.attach_per_side]:
+                state = yield AttachPassage(name, target, ident)
+        return state
+
+    def _synthesize_and_attach(
+        self,
+        state: State,
+        x: str,
+        y: str,
+        added: list[tuple[str, list[str]]],
+        phrasings: dict[str, list[str]],
+    ) -> Steps:
+        """One reading of everything retrieved, then the edges and passages it supports."""
+        assert self.synthesize is not None
+        try:
+            supports = list(
+                self.synthesize(x, y, [name for name, _ in added], sorted(state.observed, key=lambda p: p.id))
+            )
+        except RemoteError:
+            supports = None  # the model could not be reached: fall back to the word-for-word ranking
+        sides: tuple[tuple[Target, str], tuple[Target, str]] = (("X", x), ("Y", y))
+        for name, own in added:
+            for target, variable in sides:
+                if supports is None:
+                    ids = [p.id for p in self._ranked(state.observed, own, phrasings[variable])]
+                else:
+                    ids = [ident for c, side, ident in supports if (c, side) == (name, target)]
+                state = yield from self._attach(state, name, target, ids)
         return state
 
     # -- the parts -----------------------------------------------------------

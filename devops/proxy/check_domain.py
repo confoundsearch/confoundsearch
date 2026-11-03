@@ -1,4 +1,4 @@
-"""Check a domain before it goes into the package: does it identify you, and does it answer?
+"""Check a domain before it goes into the package: does it reveal you, and does it answer?
 
     python devops/proxy/check_domain.py confoundsearch.org
     python devops/proxy/check_domain.py confoundsearch.org --host svc.confoundsearch.org   # if a subdomain

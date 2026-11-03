@@ -22,6 +22,7 @@ from confoundsearch.data.demo import (
 from confoundsearch.errors import CorpusError, RemoteError
 from confoundsearch.interface import cli
 from confoundsearch.logic.graph import Passage
+from confoundsearch.model.llm import temperature_for
 from tests.test_cli import COMMON
 
 ROOT = Path(__file__).parent.parent
@@ -398,18 +399,18 @@ class TestTheDemoCommand:
     def test_the_model_follows_the_key_that_is_set(self, monkeypatch):
         assert cli.demo_model(self.parse()) is None
         assert cli.demo_model(self.parse("--model", "mine")) == "mine"
-        assert cli.demo_model(self.parse("--api-key", "k")) == "gpt-4.1-mini"
+        assert cli.demo_model(self.parse("--api-key", "k")) == RECORDED_MODEL
         monkeypatch.setenv("OPENAI_BASE_URL", "http://localhost:1/v1")
-        assert cli.demo_model(self.parse()) == "gpt-4.1-mini"
+        assert cli.demo_model(self.parse()) == RECORDED_MODEL
         monkeypatch.delenv("OPENAI_BASE_URL")
         monkeypatch.setenv("OPENAI_API_KEY", "k")
-        assert cli.demo_model(self.parse()) == "gpt-4.1-mini"
+        assert cli.demo_model(self.parse()) == RECORDED_MODEL
         monkeypatch.setenv("OPENROUTER_API_KEY", "k")  # both set: OpenAI's own key is used
-        assert cli.demo_model(self.parse()) == "gpt-4.1-mini"
+        assert cli.demo_model(self.parse()) == RECORDED_MODEL
         monkeypatch.delenv("OPENAI_API_KEY")
-        assert cli.demo_model(self.parse()) == "openai/gpt-4.1-mini"  # only OpenRouter
+        assert cli.demo_model(self.parse()) == f"openai/{RECORDED_MODEL}"  # only OpenRouter
         monkeypatch.setenv("OPENAI_API_KEY", "k")
-        assert cli.demo_model(self.parse("--openrouter")) == "openai/gpt-4.1-mini"
+        assert cli.demo_model(self.parse("--openrouter")) == f"openai/{RECORDED_MODEL}"
 
     def test_by_default_it_is_the_curated_example_on_the_shipped_papers(self, monkeypatch, tmp_path, capsys):
         monkeypatch.setenv("OPENAI_API_KEY", "k")
@@ -418,7 +419,7 @@ class TestTheDemoCommand:
         monkeypatch.setattr(cli, "main", lambda argv=None: seen.append(list(argv)) or 0)
         assert real(["demo", "--out", str(tmp_path / "d.html")]) == 0
         (argv,) = seen
-        assert argv[:5] == ["run", "--model", "gpt-4.1-mini", "--iv", "Organizational structure"]
+        assert argv[:5] == ["run", "--model", RECORDED_MODEL, "--iv", "Organizational structure"]
         assert argv[argv.index("--corpus") + 1] == "demo"  # the shipped example papers: no internet
         assert (
             argv[argv.index("--confounds") + 1] == "3" and "--replay" not in argv
@@ -630,7 +631,7 @@ class TestTheShippedRecording:
         )
         assert cli.main(self.argv(tmp_path, "--replay")) == 0
         events = [json.loads(line)["event"] for line in (tmp_path / "p.log.jsonl").read_text().splitlines()]
-        assert events.count("model_cache_hit") >= 30 and "model_cache_miss" not in events
+        assert events.count("model_cache_hit") >= 5 and "model_cache_miss" not in events
         assert "cache_miss" not in events and events.count("cache_hit") >= 20  # every search was saved too
 
     def test_demo_with_no_keys_at_all_works_and_says_so(self, tmp_path, monkeypatch, capsys):
@@ -755,7 +756,7 @@ class TestCurating:
         sent = []
 
         class Spy:
-            model, temperature = RECORDED_MODEL, 0.0
+            model, temperature = RECORDED_MODEL, temperature_for(RECORDED_MODEL)
 
             def chat(self, messages):
                 sent.append(list(messages))
@@ -763,7 +764,7 @@ class TestCurating:
 
         LLMConfounds(Spy(), len(CURATED_CONFOUNDS))(*DEMO_QUESTION)
         saved = PaperDatabase(database_path(tmp_path, DEMO_QUESTION)).load_call(
-            call_key(RECORDED_MODEL, 0.0, sent[0])
+            call_key(RECORDED_MODEL, temperature_for(RECORDED_MODEL), sent[0])
         )
         assert json.loads(saved) == {"confounds": list(CURATED_CONFOUNDS)}
 

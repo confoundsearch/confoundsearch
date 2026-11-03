@@ -5,7 +5,7 @@
 #
 #   SOURCE_REF  the branch (or tag) to copy     default: orgsci
 #   EXCLUDE     folders or files left out of the public copy, space separated     default: examples
-#   BLOCKLIST   file of identifying patterns, one regex per line (keep it outside this repository)
+#   BLOCKLIST   file of patterns that reveal you, one regex per line (keep it outside this repository)
 #
 # DEST is a clone of the review repository (or an empty folder). Its files are made to match the branch
 # exactly: new files appear, changed ones are replaced, deleted ones are removed. Its .git is left alone

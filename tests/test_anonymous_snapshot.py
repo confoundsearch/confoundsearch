@@ -50,7 +50,7 @@ def test_a_blocklist_hit_fails_and_leaves_nothing_behind(tmp_path):
     blocklist.write_text("zzz-" + "not-present\nconfoundsearch" + " serve\n")
     dest = tmp_path / "anon"
     result = run(dest, blocklist)
-    assert result.returncode == 1 and "identifying text found" in result.stderr
+    assert result.returncode == 1 and "personal text found" in result.stderr
     assert not dest.exists()
 
 

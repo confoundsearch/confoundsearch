@@ -25,6 +25,17 @@ class Judge(Protocol):
         ...
 
 
+class TrustSynthesis:
+    """Accepts every passage it is asked about.
+
+    With a synthesis, the policy cites only passages that the synthesis (one reading of everything retrieved,
+    by meaning) found to support a link, so that reading is the judgment and no second opinion is asked.
+    """
+
+    def supports(self, passage: Passage, source: Vertex, target: str) -> bool:
+        return True
+
+
 class Environment:
     def __init__(self, corpus: Corpus, judge: Judge) -> None:
         self.corpus = corpus

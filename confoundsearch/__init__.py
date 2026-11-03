@@ -36,20 +36,21 @@ from confoundsearch.logic.policy import EpsilonGreedy, LookaheadQ, Softmax
 from confoundsearch.logic.reward import phi, reward
 from confoundsearch.logic.state import State
 from confoundsearch.logic.terms import Expansion, KeywordExpander, Term, expand_terms
-from confoundsearch.logic.transition import Environment, Judge
+from confoundsearch.logic.transition import Environment, Judge, TrustSynthesis
 from confoundsearch.model.embeddings import OpenAIEmbedder
-from confoundsearch.model.expansion import LLMTermVariants
+from confoundsearch.model.expansion import LLMMeasures, LLMMechanisms, LLMTermVariants
 from confoundsearch.model.llm import (
     LLMConfounds,
     LLMJudge,
     LLMProposer,
     LLMRewordings,
     LLMSynonyms,
+    LLMSynthesis,
     OpenAICompatibleClient,
     Proposer,
 )
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 __all__ = [
     "Action",
@@ -81,9 +82,12 @@ __all__ = [
     "LLMConfounds",
     "LLMError",
     "LLMJudge",
+    "LLMMeasures",
+    "LLMMechanisms",
     "LLMProposer",
     "LLMRewordings",
     "LLMSynonyms",
+    "LLMSynthesis",
     "LLMTermVariants",
     "LookaheadQ",
     "Match",
@@ -103,6 +107,7 @@ __all__ = [
     "Stop",
     "Term",
     "Trajectory",
+    "TrustSynthesis",
     "VectorRecord",
     "VectorStore",
     "VectorStoreError",

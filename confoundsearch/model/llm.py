@@ -21,7 +21,7 @@ from typing import Any, Mapping, Protocol
 from confoundsearch.errors import LLMError, RemoteError
 from confoundsearch.http import Transport, urllib_transport
 from confoundsearch.logic.actions import Action, AddConfound, Merge, Retrieve, enumerate_actions
-from confoundsearch.logic.graph import Passage, Vertex, normalize
+from confoundsearch.logic.graph import Passage, Target, Vertex, normalize
 from confoundsearch.logic.state import State
 from confoundsearch.model.cost import Spend
 
@@ -33,6 +33,15 @@ HINTS = {
     402: "the account is out of credits",
     429: "rate limited: wait a moment, or lower --max-steps",
 }
+
+
+def temperature_for(model: str | None) -> float | None:
+    """The temperature to send: 0 for repeatable answers, or none where only the model's default is accepted.
+
+    The newer GPT models (the GPT-5 and GPT-6 families) reject any temperature but their default.
+    """
+    name = (model or "").rsplit("/", 1)[-1].lower()
+    return None if name.startswith(("gpt-5", "gpt-6")) else 0.0
 
 
 class ChatClient(Protocol):
@@ -126,6 +135,71 @@ class LLMJudge:
         )
         answer = self.client.chat([{"role": "user", "content": prompt}])
         return answer.strip().casefold().startswith("yes")
+
+
+SYNTHESIS_BATCH = 40  # passages per synthesis call
+
+
+class LLMSynthesis:
+    """Reads the passages that were retrieved, all at once, and says which support each confound's links.
+
+    Unlike a word-for-word match, it judges by meaning: a passage may describe a confound in other words.
+    Every line it returns is checked against what was really retrieved, so it cannot cite anything else.
+    """
+
+    def __init__(self, client: ChatClient, batch: int = SYNTHESIS_BATCH) -> None:
+        self.client = client
+        self.batch = batch
+
+    def __call__(
+        self, x: str, y: str, confounds: Sequence[str], passages: Sequence[Passage]
+    ) -> list[tuple[str, Target, str]]:
+        """(confound, "X" or "Y", passage id) for each passage that supports a link, best first."""
+        found: list[tuple[str, Target, str]] = []
+        for start in range(0, len(passages), self.batch):
+            for line in self.client.chat(
+                self._messages(x, y, confounds, passages[start : start + self.batch])
+            ).splitlines():
+                support = self._support(line, confounds, passages)
+                if support is not None and support not in found:
+                    found.append(support)
+        return found
+
+    @staticmethod
+    def _messages(x: str, y: str, confounds: Sequence[str], batch: Sequence[Passage]) -> list[Message]:
+        lines = [
+            f'A study asks whether "{x}" (X) affects "{y}" (Y). A confound is a construct that affects X and',
+            f"also affects Y. The candidate confounds are: {', '.join(confounds)}.",
+            "",
+            "Below are papers (an id, a title and a text). For each candidate confound and each side,",
+            "(X or Y), list every paper whose text reports, studies or argues that the confound affects (or",
+            "determines, shapes, or is associated with) that variable. A paper may name the idea in other",
+            "words than the confound's: judge by meaning, not by exact wording. Use only the papers below.",
+            "",
+            "Reply with JSON lines only, one object per line:",
+            '{"confound": "<candidate>", "side": "X" or "Y", "id": "<paper id>", "quote": "<short phrase>"}',
+            "If nothing qualifies, reply with nothing.",
+            "",
+        ]
+        for passage in batch:
+            lines += [f"id: {passage.id}", f"title: {passage.title}", f"text: {passage.text[:900]}", ""]
+        return [{"role": "user", "content": "\n".join(lines)}]
+
+    @staticmethod
+    def _support(
+        line: str, confounds: Sequence[str], passages: Sequence[Passage]
+    ) -> tuple[str, Target, str] | None:
+        try:
+            item = json.loads(_FENCE.sub("", line.strip()))
+            confound, side, ident = item["confound"], item["side"], item["id"]
+        except (ValueError, KeyError, TypeError):
+            return None
+        names = {name.casefold(): name for name in confounds}
+        known = any(passage.id == ident for passage in passages)
+        if side not in ("X", "Y") or not isinstance(confound, str) or not known:
+            return None
+        name = names.get(confound.strip().casefold())
+        return (name, side, str(ident)) if name is not None else None
 
 
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$")

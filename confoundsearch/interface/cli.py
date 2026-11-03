@@ -72,9 +72,9 @@ from confoundsearch.logic.episode import ActionSource, Step, Trajectory, run_epi
 from confoundsearch.logic.expand import ExpandedCorpus
 from confoundsearch.logic.policy import EpsilonGreedy, LookaheadQ, Policy
 from confoundsearch.logic.reward import phi
-from confoundsearch.logic.transition import Environment
+from confoundsearch.logic.transition import Environment, Judge, TrustSynthesis
 from confoundsearch.model.embeddings import OpenAIEmbedder
-from confoundsearch.model.expansion import FIELDS
+from confoundsearch.model.expansion import FIELDS, LLMMeasures, LLMMechanisms
 from confoundsearch.model.llm import (
     OPENROUTER_URL,
     ChatClient,
@@ -83,8 +83,10 @@ from confoundsearch.model.llm import (
     LLMProposer,
     LLMRewordings,
     LLMSynonyms,
+    LLMSynthesis,
     OpenAICompatibleClient,
     Proposer,
+    temperature_for,
 )
 from confoundsearch.runlog import RunLog
 
@@ -273,6 +275,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="deterministic policy: how many confounds to ask for",
     )
     llm.add_argument(
+        "--no-synthesis",
+        action="store_true",
+        help="deterministic: skip the synthesis (one reading of everything retrieved, by meaning) and keep "
+        "only passages that use the confound's and the variable's words",
+    )
+    llm.add_argument(
+        "--no-mechanisms",
+        action="store_true",
+        help="deterministic: skip the second round of searches on the measures of each variable and the "
+        "mechanisms of each confound (it needs the synthesis)",
+    )
+    llm.add_argument(
         "--queries",
         type=int,
         default=3,
@@ -385,7 +399,7 @@ def build_parser() -> argparse.ArgumentParser:
         "performance), then open the result. Its searches ship pre-saved, so it is fast",
     )
     demo.add_argument(
-        "--model", help="default: gpt-4.1-mini, or openai/gpt-4.1-mini with only an OpenRouter key"
+        "--model", help=f"default: {RECORDED_MODEL}, or openai/{RECORDED_MODEL} with only an OpenRouter key"
     )
     demo.add_argument("--base-url", help="default: $OPENAI_BASE_URL or https://api.openai.com/v1")
     demo.add_argument("--api-key", help="default: $OPENAI_API_KEY (with --openrouter: $OPENROUTER_API_KEY)")
@@ -433,6 +447,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--per-variant", type=int, default=4, help="synonyms asked for of each field term (0: none)"
     )
     expand.add_argument("--per-hypernym", type=int, default=3, help="broader terms asked for (0: none)")
+    expand.add_argument(
+        "--per-mechanism", type=int, default=6, help="channels it works through asked for (0: none)"
+    )
     expand.add_argument(
         "--neighbor-top", type=int, default=100, help="how many of the best keywords to ask synonyms of"
     )
@@ -500,6 +517,7 @@ CORPORA = ("service", "elasticsearch", "semanticscholar", "openalex", "file", "d
 S2_INTERVAL = 1.1  # seconds between Semantic Scholar requests: its keyed limit is one a second
 OPENALEX_INTERVAL = 0.2
 POLICIES = ("deterministic", "epsilon-greedy")
+SYNTHESIS_ATTACH = 8  # passages cited per link when the synthesis has already chosen them (4 when it has not)
 RUN_STEPS = 1000  # a deterministic run ends by itself; this only stops one that would never end
 
 
@@ -577,11 +595,18 @@ def build_client(args: argparse.Namespace) -> OpenAICompatibleClient:
         args.api_key or args.base_url or os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENAI_BASE_URL")
     )
     if not (args.openrouter or only_openrouter):
-        return OpenAICompatibleClient(args.model, base_url=args.base_url, api_key=args.api_key)
+        return OpenAICompatibleClient(
+            args.model, base_url=args.base_url, api_key=args.api_key, temperature=temperature_for(args.model)
+        )
     key = args.api_key or os.environ.get("OPENROUTER_API_KEY")
     if not key:
         raise SystemExit("error: --openrouter needs OPENROUTER_API_KEY (put it in a .env file) or --api-key")
-    return OpenAICompatibleClient(args.model, base_url=args.base_url or OPENROUTER_URL, api_key=key)
+    return OpenAICompatibleClient(
+        args.model,
+        base_url=args.base_url or OPENROUTER_URL,
+        api_key=key,
+        temperature=temperature_for(args.model),
+    )
 
 
 @dataclass
@@ -643,7 +668,8 @@ def build_backend(args: argparse.Namespace) -> Backend:
     if (
         args.policy == "deterministic"
     ):  # it carries its own plan: no model call to propose moves at every step
-        return Backend(Environment(corpus, LLMJudge(client)), Proposer(), client)
+        judge: Judge = LLMJudge(client) if args.no_synthesis else TrustSynthesis()  # see TrustSynthesis
+        return Backend(Environment(corpus, judge), Proposer(), client)
     if synonym_count(args) > 0:
         corpus = ExpandedCorpus(corpus, LLMRewordings(client, synonym_count(args)), synonym_count(args))
     return Backend(Environment(corpus, LLMJudge(client)), Proposer(LLMProposer(client)), client)
@@ -656,6 +682,10 @@ def deterministic_policy(args: argparse.Namespace, client: ChatClient) -> Determ
         max_confounds=args.confounds,
         synonyms_per_term=synonym_count(args),
         queries_per_side=args.queries,
+        attach_per_side=4 if args.no_synthesis else SYNTHESIS_ATTACH,
+        synthesize=None if args.no_synthesis else LLMSynthesis(client),
+        measures=None if args.no_synthesis or args.no_mechanisms else LLMMeasures(client),
+        mechanisms=None if args.no_synthesis or args.no_mechanisms else LLMMechanisms(client),
     )
 
 
@@ -710,9 +740,9 @@ def demo_model(args: argparse.Namespace) -> str | None:
         args.api_key or os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENAI_BASE_URL")
     )
     if args.openrouter or only_openrouter:
-        return "openai/gpt-4.1-mini"
+        return f"openai/{RECORDED_MODEL}"
     if args.api_key or os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENAI_BASE_URL"):
-        return "gpt-4.1-mini"
+        return RECORDED_MODEL
     return None
 
 
@@ -858,6 +888,7 @@ def expand(args: argparse.Namespace) -> int:
         per_variant=args.per_variant,
         max_seeds=args.max_seeds,
         per_hypernym=args.per_hypernym,
+        per_mechanism=args.per_mechanism,
         neighbor_top=args.neighbor_top,
         per_neighbor=args.per_neighbor,
     )

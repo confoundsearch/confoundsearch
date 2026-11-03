@@ -70,6 +70,49 @@ class LLMTermVariants:
         return terms
 
 
+class LLMMeasures:
+    """The specific measures, forms or outcomes that papers name when they study a variable.
+
+    Not synonyms of its label: for "firm performance", terms like "return on equity" or "labor productivity".
+    """
+
+    def __init__(self, client: ChatClient, count: int = 8) -> None:
+        self.client, self.count = client, count
+
+    def __call__(self, term: str) -> list[str]:
+        prompt = (
+            f'In empirical social science papers, "{term}" is studied through specific measures, forms or '
+            "outcomes that papers name directly (not synonyms of the label). "
+            f"List {self.count}, 1 to 4 words each. "
+            'Reply with JSON only: {"terms": ["..."]}'
+        )
+        return clean(
+            _strings(self.client.chat([{"role": "user", "content": prompt}]), "terms"), {normalize(term)}
+        )
+
+
+class LLMMechanisms:
+    """The specific channels through which a construct could act (on a variable, when one is given).
+
+    For "CEO style" acting on "organizational structure": "delegation of authority", "incentive design".
+    Papers that study an effect usually name the channel, not the construct's label.
+    """
+
+    def __init__(self, client: ChatClient, count: int = 6) -> None:
+        self.client, self.count = client, count
+
+    def __call__(self, construct: str, target: str | None = None) -> list[str]:
+        on = f' affect "{target}"' if target else " work"
+        prompt = (
+            f'Through what specific channels or mechanisms could "{construct}"{on}? '
+            f"Name {self.count} concrete mechanisms, 1 to 4 words each, as empirical papers would name them. "
+            'Reply with JSON only: {"terms": ["..."]}'
+        )
+        return clean(
+            _strings(self.client.chat([{"role": "user", "content": prompt}]), "terms"), {normalize(construct)}
+        )
+
+
 FIELDS = (
     "economics",
     "finance",
@@ -221,8 +264,10 @@ class LLMWideNet:
     2. `LLMFieldVariants`: what each social science field calls it or uses as a stand-in.
     3. `LLMHypernyms`: broader terms for the construct and for each of those field variants.
     4. `LLMTermSynonyms`: other names for each of those field variants.
+    5. `LLMMechanisms`: the specific channels the construct works through (papers name these, not the label).
 
-    It returns (term, kind) pairs, with kinds "synonym", "variant", "hypernym" and "variant synonym", so that
+    It returns (term, kind) pairs, with kinds "synonym", "variant", "hypernym", "variant synonym" and
+    "mechanism", so that
     where every term came from survives into the result. A stage that fails is skipped and noted in
     `problems`; if all fail, that is an error.
     """
@@ -238,6 +283,7 @@ class LLMWideNet:
         context: str = "",
         workers: int = 4,
         per_hypernym: int = 3,
+        per_mechanism: int = 6,
     ) -> None:
         self.angles = LLMTermVariants(client, rounds, per_round, context)
         self.variants = LLMFieldVariants(client, fields, per_field, context, workers)
@@ -245,6 +291,8 @@ class LLMWideNet:
         self.hypernyms = LLMHypernyms(client, per_hypernym, workers=workers)
         self.use_fields, self.use_synonyms = bool(fields) and per_field > 0, per_variant > 0
         self.use_hypernyms = per_hypernym > 0
+        self.mechanisms = LLMMechanisms(client, per_mechanism)
+        self.use_mechanisms = per_mechanism > 0
         self.problems: list[str] = []
 
     def __call__(self, construct: str) -> list[tuple[str, str]]:
@@ -270,6 +318,8 @@ class LLMWideNet:
             stage("hypernyms", "hypernym", lambda: self.hypernyms([construct, *variants]))
         if variants and self.use_synonyms:
             stage("synonyms of the variants", "variant synonym", lambda: self.synonyms(variants))
+        if self.use_mechanisms:
+            stage("mechanisms", "mechanism", lambda: self.mechanisms(construct))
         if not pairs and self.problems:
             raise LLMError("; ".join(self.problems))
         return pairs

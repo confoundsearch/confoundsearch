@@ -23,7 +23,7 @@ from confoundsearch.data.cache import WRITES, PaperDatabase, call_key, database_
 from confoundsearch.errors import ReplayMiss
 from confoundsearch.logic.audit import mark_replayed
 from confoundsearch.model.cost import Spend
-from confoundsearch.model.llm import ChatClient
+from confoundsearch.model.llm import ChatClient, temperature_for
 
 
 class CachedClient:
@@ -37,8 +37,8 @@ class CachedClient:
     ) -> None:
         self.client, self.folder, self.scope, self.log = client, Path(folder), scope, log
         self.model = getattr(client, "model", None) or model
-        # a replay has no client to ask, so it assumes the default every recording used
-        self.temperature = getattr(client, "temperature", 0.0)
+        # a replay has no client to ask, so it assumes what a recording of that model used
+        self.temperature = getattr(client, "temperature", temperature_for(self.model))
         self.spend = getattr(client, "spend", None) or Spend(self.model or "")  # a replay costs nothing
         self.hits = self.misses = 0
 

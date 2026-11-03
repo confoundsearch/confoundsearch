@@ -1,4 +1,4 @@
-"""devops/proxy/check_domain.py: does a domain identify its owner, and does it answer? (Made-up replies.)"""
+"""devops/proxy/check_domain.py: does a domain reveal its owner, and does it answer? (Made-up replies.)"""
 
 import importlib.util
 import ssl
@@ -79,7 +79,7 @@ class TestContacts:
         )  # masked in the report
         assert "street 12***" in text and "Springfield" not in text
 
-    def test_country_alone_does_not_identify_anyone(self):
+    def test_country_alone_does_not_reveal_anyone(self):
         assert levels(cd.contact_findings({"entities": [contact("registrant", adr=("", ""))]})) == ["OK"]
 
     def test_no_contacts_at_all_is_fine_and_other_roles_are_ignored(self):
