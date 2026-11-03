@@ -50,7 +50,7 @@ from confoundsearch.model.llm import (
     Proposer,
 )
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 
 __all__ = [
     "Action",
