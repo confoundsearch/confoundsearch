@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from confoundsearch.interface.ui.page import byline, papers, yes
+from confoundsearch.logic.graph import Graph
 
 FORMATS = ("ui", "text")
 QUOTE_LIMIT = 300
@@ -76,6 +77,21 @@ def open_page(
     if not opened:
         say(f"could not open a browser; open this file yourself: {page.resolve()}")
     return opened
+
+
+def findings_text(graph: Graph) -> str:
+    """What the run found, in plain lines: each confound with evidence, and how many papers back each link."""
+    found = [v.label for v in graph.confounds if graph.evidence(v.label)]
+    if not found:
+        return "No candidate confound had supporting evidence in the papers it retrieved."
+    width = max(len(label) for label in found)
+    lines = [f"Candidate confounds for {graph.x} \u2192 {graph.y}:"]
+    for label in found:
+        to_x, to_y = len(graph.passages(label, "X")), len(graph.passages(label, "Y"))
+        note = "" if to_x and to_y else "  (one link only)"
+        links = f"{papers(to_x)} \u2192 {graph.x} \u00b7 {papers(to_y)} \u2192 {graph.y}"
+        lines.append(f"  {label:<{width}}  {links}{note}")
+    return "\n".join(lines)
 
 
 def where_it_went(

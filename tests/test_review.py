@@ -185,8 +185,18 @@ class TestRunReview:
 
     def test_the_browser_can_open_while_json_owns_stdout(self, tmp_path, monkeypatch, capsys, env, opened):
         assert self.run(tmp_path, monkeypatch, env, "--review", "--json") == 0
-        json.loads(capsys.readouterr().out)
+        captured = capsys.readouterr()
+        json.loads(captured.out)  # stdout is the JSON and nothing else
+        assert "Opening the interface" in captured.err
         assert opened == [tmp_path / "r.html"]
+
+    def test_opening_the_interface_is_said_and_the_findings_come_first(
+        self, tmp_path, monkeypatch, capsys, env, opened
+    ):
+        assert self.run(tmp_path, monkeypatch, env, "--review") == 0
+        out = capsys.readouterr().out
+        assert "Candidate confounds for" in out and out.index("Candidate confounds") < out.index(" steps, ")
+        assert out.rstrip().endswith("Opening the interface in your browser\u2026")
 
 
 def test_a_share_data_json_is_used_as_it_is(tmp_path):
@@ -203,3 +213,28 @@ def test_run_makes_the_output_folder_it_is_pointed_at(tmp_path, monkeypatch, env
     assert out.exists() and (out.parent / "org.audit.jsonl").exists()
     audit = tmp_path / "audits" / "a.jsonl"
     assert cli.main([*RUN_ARGV, "--out", str(out), "--audit", str(audit)]) == 0 and audit.exists()
+
+
+class TestFindingsText:
+    def graph(self):
+        from confoundsearch import Graph, Passage, Vertex
+
+        g = Graph("IT", "perf")
+        for label in ("firm size", "firm age", "weather"):
+            g = g.add_confound(Vertex(label, frozenset({label})))
+        for label, target in (("firm size", "X"), ("firm size", "Y"), ("firm age", "X")):
+            g = g.add_edge(label, target).attach(label, target, Passage(f"{label}{target}", "t", "T", "u"))
+        return g
+
+    def test_each_confound_with_evidence_is_listed_with_its_paper_counts(self):
+        lines = review.findings_text(self.graph()).splitlines()
+        assert lines[0] == "Candidate confounds for IT → perf:"
+        assert lines[1].strip().startswith("firm age") and lines[1].endswith("(one link only)")  # by name
+        assert "0 papers \u2192 perf" in lines[1]
+        assert lines[2].strip() == "firm size  1 paper \u2192 IT \u00b7 1 paper \u2192 perf"
+        assert len(lines) == 3  # "weather" had no evidence
+
+    def test_no_evidence_says_so(self):
+        from confoundsearch import Graph
+
+        assert review.findings_text(Graph("IT", "perf")).startswith("No candidate confound had")

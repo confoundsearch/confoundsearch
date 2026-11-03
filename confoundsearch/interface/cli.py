@@ -61,7 +61,13 @@ from confoundsearch.interface.known import load_known, page_from_json
 from confoundsearch.interface.modelcache import CachedClient, find_cached
 from confoundsearch.interface.result import run_result
 from confoundsearch.interface.review import FORMATS as REVIEW_FORMATS
-from confoundsearch.interface.review import load_share, open_page, review_text, where_it_went
+from confoundsearch.interface.review import (
+    findings_text,
+    load_share,
+    open_page,
+    review_text,
+    where_it_went,
+)
 from confoundsearch.interface.server import RunManager, make_server
 from confoundsearch.interface.ui import standalone_html
 from confoundsearch.logic.actions import AddConfound, AddEdge, AttachPassage, Merge, Retrieve
@@ -1051,7 +1057,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             if not args.status.live:  # a terminal shows the status line instead of a line per step
                 print(progress(len(steps), step), file=sys.stderr, flush=True)
 
-        args.status.total = max_steps
+        args.status.total = 0 if args.policy == "deterministic" else max_steps  # that plan ends by itself
         args.status.start()
         try:
             trajectory = run_episode(
@@ -1090,6 +1096,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(result, indent=2))
     else:
         graph = trajectory.final.graph
+        print(f"{findings_text(graph)}\n")
         print(
             f"{len(trajectory.steps)} steps, {len(graph.connected())} connected, phi={trajectory.score:.3f}"
         )
@@ -1113,5 +1120,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.review == "text":
         print(review_text(share), end="")
     elif args.review:
+        print("Opening the interface in your browser\u2026", file=sys.stderr if args.json else sys.stdout)
         open_page(args.out)
     return 1 if failed else 0
