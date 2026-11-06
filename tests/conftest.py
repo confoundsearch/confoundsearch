@@ -55,6 +55,14 @@ def away_from_the_repo(monkeypatch, tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
+def no_demo_pause(monkeypatch):
+    """The demo waits a little between steps so that it can be watched; a test must not."""
+    from confoundsearch.interface import cli
+
+    monkeypatch.setattr(cli, "DEMO_PACE", 0.0)
+
+
+@pytest.fixture(autouse=True)
 def private_cache(monkeypatch, tmp_path_factory):
     """No test may read or fill the saved searches in the real home folder."""
     monkeypatch.setenv("CONFOUNDSEARCH_CACHE", str(tmp_path_factory.mktemp("cache")))

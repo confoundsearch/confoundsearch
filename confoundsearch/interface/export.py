@@ -15,6 +15,7 @@ from __future__ import annotations
 import io
 import json
 import zipfile
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -31,29 +32,73 @@ def plain(text: str) -> str:
     return text.translate({ord("<"): None, ord(">"): None, ord('"'): "\u201d", ord("'"): "\u2019"})
 
 
-def _entry(passage: Passage, label: str) -> dict[str, str]:
-    return {
+def _entry(passage: Passage, label: str, highlight: str = "") -> dict[str, Any]:
+    entry: dict[str, Any] = {
         "title": plain(passage.title or passage.text[:80]),
         "url": passage.url if passage.url.startswith(("http://", "https://")) else "",
         "quote": passage.text,
         "llm_label": label,
     }
+    for field in ("authors", "venue"):  # shown under the title when the source gave them
+        if getattr(passage, field):
+            entry[field] = plain(getattr(passage, field))
+    for field in ("year", "cited_by"):
+        if getattr(passage, field) is not None:
+            entry[field] = getattr(passage, field)
+    if highlight:
+        entry["highlight"] = highlight  # the sentence of `quote` that best states the claim
+    return entry
 
 
-def _evidence(state: State, label: str, target: Target) -> list[dict[str, str]]:
-    entries = [_entry(p, "Yes") for p in sorted(state.graph.passages(label, target), key=lambda p: p.id)]
+def most_cited_first(passage: Passage) -> tuple[int, str, str]:
+    """A sort key: the more a paper is cited the sooner it comes, then by title; papers with no count last."""
+    return (-(passage.cited_by if passage.cited_by is not None else -1), passage.title.casefold(), passage.id)
+
+
+def choose_highlights(
+    state: State, highlight: Callable[[str, str, Sequence[Passage]], Mapping[str, str]]
+) -> dict[tuple[str, Target, str], str]:
+    """Ask `highlight` once for each link that has papers: which sentence of each best states the claim.
+
+    Returns {(confound, target, passage id): sentence}. A link it cannot answer for simply has none.
+    """
+    chosen: dict[tuple[str, Target, str], str] = {}
+    for vertex in state.graph.confounds:
+        for target in TARGETS:
+            cited = sorted(state.graph.passages(vertex.label, target), key=most_cited_first)
+            if not cited:
+                continue
+            for passage_id, sentence in highlight(
+                vertex.label, state.graph.target_name(target), cited
+            ).items():
+                chosen[(vertex.label, target, passage_id)] = sentence
+    return chosen
+
+
+def _evidence(
+    state: State, label: str, target: Target, highlights: Mapping[tuple[str, Target, str], str]
+) -> list[dict[str, Any]]:
+    entries = [
+        _entry(p, "Yes", highlights.get((label, target, p.id), ""))
+        for p in sorted(state.graph.passages(label, target), key=most_cited_first)
+    ]
     rejected = {pid for (lbl, tgt), pid in state.rejected if (lbl, tgt) == (label, target)}
     entries += [_entry(p, "No") for p in sorted(state.observed, key=lambda p: p.id) if p.id in rejected]
     return entries
 
 
-def to_share_data(state: State) -> dict[str, Any]:
+def to_share_data(
+    state: State, highlights: Mapping[tuple[str, Target, str], str] | None = None
+) -> dict[str, Any]:
+    """The result for the interface. Papers come most-cited first; `highlights` maps (confound, target,
+    passage id) to the sentence of that paper which best states the link."""
     graph = state.graph
+    marked = highlights or {}
     confounders, meta_dimensions, names = [], [], []
     for vertex in graph.confounds:
         label = plain(vertex.label)
         strings = ", ".join(sorted(plain(s) for s in vertex.strings))
-        evidence = {t: _evidence(state, vertex.label, t) for t in TARGETS}
+        evidence = {t: _evidence(state, vertex.label, t, marked) for t in TARGETS}
         confounders.append({"name": label, "evidence_to_iv": evidence["X"], "evidence_to_dv": evidence["Y"]})
         meta_dimensions.append(
             {

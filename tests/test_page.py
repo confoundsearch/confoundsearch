@@ -225,7 +225,9 @@ class TestTheEvidence:
             html.index("Supports: Age \u2192 X var"),
             html.index("\u201cIt&#x27;s a result.\u201d"),
             html.index(">Firm Age</a>"),
-            html.index("A. Author, B. Writer \u00b7 A Journal \u00b7 2012"),
+            html.index('<span class="authors">A. Author, B. Writer</span>'),
+            html.index('<span class="venue">A Journal</span>'),
+            html.index('<span class="year">2012</span>'),
         ]
         assert order == sorted(order)
         assert '<a href="https://doi.org/10.1/x" target="_blank">' in html

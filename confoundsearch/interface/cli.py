@@ -56,7 +56,7 @@ from confoundsearch.dotenv import keep_out_of_git, load_dotenv, update_dotenv
 from confoundsearch.errors import BudgetReached, RemoteError, ReplayMiss
 from confoundsearch.http import Transport, resilient, urllib_transport
 from confoundsearch.interface.expander import build_expander
-from confoundsearch.interface.export import to_share_data
+from confoundsearch.interface.export import choose_highlights, to_share_data
 from confoundsearch.interface.known import load_known, page_from_json
 from confoundsearch.interface.modelcache import CachedClient, find_cached
 from confoundsearch.interface.result import run_result
@@ -76,8 +76,10 @@ from confoundsearch.logic.audit import current as current_log
 from confoundsearch.logic.deterministic import DeterministicPolicy
 from confoundsearch.logic.episode import ActionSource, Step, Trajectory, run_episode
 from confoundsearch.logic.expand import ExpandedCorpus
+from confoundsearch.logic.graph import Target
 from confoundsearch.logic.policy import EpsilonGreedy, LookaheadQ, Policy
 from confoundsearch.logic.reward import phi
+from confoundsearch.logic.state import State
 from confoundsearch.logic.transition import Environment, Judge, TrustSynthesis
 from confoundsearch.model.embeddings import OpenAIEmbedder
 from confoundsearch.model.expansion import FIELDS, LLMAttributes, LLMMeasures, LLMMechanisms
@@ -85,6 +87,7 @@ from confoundsearch.model.llm import (
     OPENROUTER_URL,
     ChatClient,
     LLMConfounds,
+    LLMHighlights,
     LLMJudge,
     LLMProposer,
     LLMRewordings,
@@ -101,6 +104,13 @@ EPIGRAPH = (
     "in a head that suffers from bounded rationality.\u201d"
     "\n  \u2014 Karl Weick, Theory Construction as Disciplined Imagination (1989, p. 529)"
 )
+DEMO_PACE = 0.012  # seconds between steps when the demo replays a cached run, so that it can be watched
+
+
+def set_off(text: str, indent: int = 4) -> str:
+    """`text` indented, with a blank line above and below, so it stands apart from the output around it."""
+    pad = " " * indent
+    return "\n".join(["", *(f"{pad}{line}".rstrip() for line in text.splitlines()), ""])
 
 
 def describe(action: object) -> str:
@@ -181,7 +191,7 @@ class StatusLine:
         with self.lock:
             if kind == "step":
                 self.step, self.phi = event["n"], event.get("phi", self.phi)
-                self.activity = "choosing the next move"
+                self.activity = "choosing the next action"
             elif kind == "asking_model":
                 self.activity = "asking the model"
             elif text:
@@ -221,6 +231,10 @@ class StatusLine:
         if self.thread is not None:
             self.thread.join()
             self.thread = None
+        self.wipe()
+
+    def wipe(self) -> None:
+        """Clear the line, if one is showing, so what is printed next starts on a clean line."""
         with self.lock:
             if self.shown:
                 self.stream.write("\r\x1b[K")
@@ -295,6 +309,18 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="deterministic: skip the second round of searches on the measures of each variable and the "
         "mechanisms of each confound (it needs the synthesis)",
+    )
+    llm.add_argument(
+        "--pace",
+        type=float,
+        default=0.0,
+        metavar="SECONDS",
+        help="wait this long after each step, so that a replay of a cached run can be watched (default: 0)",
+    )
+    llm.add_argument(
+        "--no-highlights",
+        action="store_true",
+        help="skip the model call that marks, in each cited paper, the sentence that best states the claim",
     )
     llm.add_argument(
         "--queries",
@@ -777,6 +803,7 @@ def demo(args: argparse.Namespace) -> int:
     elif replay:
         argv += ["--corpus", "semanticscholar,openalex"]  # the sources whose searches ship saved
     argv += ["--replay"] if replay else []
+    argv += ["--pace", str(DEMO_PACE)] if (replay or not args.live) and DEMO_PACE > 0 else []  # a cached run
     confounds = args.confounds or (4 if args.live else len(CURATED_CONFOUNDS))
     argv += ["--confounds", str(confounds), "--max-budget", str(args.max_budget), "--out", str(args.out)]
     for flag, value in (("--base-url", args.base_url), ("--api-key", args.api_key)):
@@ -1041,7 +1068,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     stopped: str | None = None
     with AuditLog(audit_path) as log:
         steps: list[Step] = []
-        print(f"{EPIGRAPH}\n", file=sys.stderr)
+        args.status.wipe()  # a status line already showing would otherwise run into the quotation
+        print(set_off(EPIGRAPH), file=sys.stderr)
 
         def show(step: Step) -> None:
             steps.append(step)
@@ -1056,12 +1084,33 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             if not args.status.live:  # a terminal shows the status line instead of a line per step
                 print(progress(len(steps), step), file=sys.stderr, flush=True)
+            if args.pace > 0:
+                time.sleep(args.pace)
 
         args.status.total = 0 if args.policy == "deterministic" else max_steps  # that plan ends by itself
+        highlights: dict[tuple[str, Target, str], str] = {}
+
+        def mark_best_sentences(final: State) -> None:
+            """Presentation, not search: a model call per link, whose failure only costs the marking."""
+            if args.no_highlights:
+                return
+            try:
+                highlights.update(choose_highlights(final, LLMHighlights(backend.client)))
+            except (RemoteError, ReplayMiss, BudgetReached) as err:
+                runlog.event("highlights_skipped", error=f"{type(err).__name__}: {err}")
+
         args.status.start()
         try:
             trajectory = run_episode(
-                env, policy, proposer, args.iv, args.dv, max_steps, on_step=show, audit=log
+                env,
+                policy,
+                proposer,
+                args.iv,
+                args.dv,
+                max_steps,
+                on_step=show,
+                audit=log,
+                finalize=mark_best_sentences,
             )
         except BudgetReached as err:  # the money allowed has been spent: a planned stop, with partial results
             stopped = str(err)
@@ -1085,7 +1134,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         runlog.event("run_finished", steps=len(steps), score=round(trajectory.score, 4), cost=round(spent, 4))
     runlog.close()
     wait_for_writes()  # the searches this run made are on disk before it says it is done
-    share = to_share_data(trajectory.final)
+    share = to_share_data(trajectory.final, highlights)
     args.out.write_text(standalone_html(share), encoding="utf-8")
     if args.json:
         result = run_result(trajectory, args.out, audit_path)

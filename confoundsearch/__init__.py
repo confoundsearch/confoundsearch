@@ -41,6 +41,7 @@ from confoundsearch.model.embeddings import OpenAIEmbedder
 from confoundsearch.model.expansion import LLMAttributes, LLMMeasures, LLMMechanisms, LLMTermVariants
 from confoundsearch.model.llm import (
     LLMConfounds,
+    LLMHighlights,
     LLMJudge,
     LLMProposer,
     LLMRewordings,
@@ -50,7 +51,7 @@ from confoundsearch.model.llm import (
     Proposer,
 )
 
-__version__ = "0.8.2"
+__version__ = "0.9.1"
 
 __all__ = [
     "Action",
@@ -82,6 +83,7 @@ __all__ = [
     "LLMAttributes",
     "LLMConfounds",
     "LLMError",
+    "LLMHighlights",
     "LLMJudge",
     "LLMMeasures",
     "LLMMechanisms",

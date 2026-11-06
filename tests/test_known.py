@@ -111,7 +111,10 @@ class TestThePage:
         known = load_known(KNOWN)
         evidence = blob(page_from_json(known))
         leg = evidence["__leg__:Market Competition:to_iv"]
-        assert "Nicholas Bloom, Raffaella Sadun, John Van Reenen \u00b7 The Quarterly Journal" in leg
+        assert '<span class="authors">Nicholas Bloom, Raffaella Sadun, John Van Reenen</span>' in leg
+        assert (
+            '<span class="venue">The Quarterly Journal of Economics</span>' in leg and ">2012</span>" in leg
+        )
 
     def test_the_example_page_is_current(self):
         assert PAGE.read_text(encoding="utf-8") == page_from_json(load_known(KNOWN))

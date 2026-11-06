@@ -144,9 +144,19 @@ class MultiCorpus:
             for rank, passage in enumerate(found, 1):
                 key = title_key(passage.title) or f"{name}:{passage.id}"  # no title: nothing to match it by
                 scores[key] = scores.get(key, 0.0) + 1.0 / (RRF_OFFSET + rank)
-                if key not in kept or len(passage.text) > len(kept[key].text):
+                earlier = kept.get(key)
+                if earlier is None or len(passage.text) > len(earlier.text):
                     kept[key] = Passage(
-                        paper_id(key, name, passage), passage.text, passage.title, passage.url
+                        paper_id(key, name, passage),
+                        passage.text,
+                        passage.title,
+                        passage.url,
+                        passage.authors or (earlier.authors if earlier else ""),
+                        passage.venue or (earlier.venue if earlier else ""),
+                        passage.year if passage.year is not None else (earlier.year if earlier else None),
+                        passage.cited_by
+                        if passage.cited_by is not None
+                        else (earlier.cited_by if earlier else None),
                     )
         if self.log:
             self.log(

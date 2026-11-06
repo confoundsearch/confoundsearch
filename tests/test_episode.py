@@ -187,3 +187,13 @@ def test_should_stop_is_polled_before_each_step(env):
     agent = Scripted(*SCRIPT)
     t = run_episode(env, agent, agent, IV, DV, should_stop=should_stop)
     assert len(t.steps) == 3 and not t.final.done and calls == [0, 1, 2, 3]
+
+
+def test_finalize_sees_the_final_state_before_the_log_is_closed(env):
+    from confoundsearch.logic.audit import AuditLog
+
+    log = AuditLog()
+    seen = []
+    t = run(env, audit=log, finalize=lambda state: seen.append((state, log.events[-1].kind)))
+    assert len(seen) == 1 and seen[0][0] == t.final and seen[0][1] != "run_finished"
+    assert log.events[-1].kind == "run_finished"

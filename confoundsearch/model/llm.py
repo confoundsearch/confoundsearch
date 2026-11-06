@@ -202,6 +202,55 @@ class LLMSynthesis:
         return (name, side, str(ident)) if name is not None else None
 
 
+class LLMHighlights:
+    """For each cited passage, the sentence that best states the claim, so the page can mark it.
+
+    The model must copy the sentence word for word; what it returns is only used if it is found in the
+    passage, and then it is the passage's own text (spacing and all), never the model's version.
+    """
+
+    def __init__(self, client: ChatClient) -> None:
+        self.client = client
+
+    def __call__(self, confound: str, target: str, passages: Sequence[Passage]) -> dict[str, str]:
+        """passage id -> the sentence of its text that best states "`confound` affects `target`"."""
+        if not passages:
+            return {}
+        lines = [
+            f'Claim: "{confound}" affects "{target}".',
+            "",
+            "For each paper below, copy word for word the single sentence from its text that most directly",
+            "states or supports the claim. Do not change, shorten or join sentences. If no sentence does,",
+            "leave the paper out. Reply with JSON lines only, one object per line:",
+            '{"id": "<paper id>", "sentence": "<the sentence>"}',
+            "",
+        ]
+        for passage in passages:
+            lines += [f"id: {passage.id}", f"text: {passage.text}", ""]
+        reply = self.client.chat([{"role": "user", "content": "\n".join(lines)}])
+        texts = {passage.id: passage.text for passage in passages}
+        found: dict[str, str] = {}
+        for line in reply.splitlines():
+            try:
+                item = json.loads(_FENCE.sub("", line.strip()))
+                ident, sentence = str(item["id"]), str(item["sentence"])
+            except (ValueError, KeyError, TypeError):
+                continue
+            span = _find_span(texts.get(ident, ""), sentence)
+            if span and ident not in found:
+                found[ident] = span
+        return found
+
+
+def _find_span(text: str, sentence: str) -> str:
+    """`sentence` as it is written in `text` (ignoring differences in spacing and case), or "" if absent."""
+    words = sentence.strip().strip("\"'\u201c\u201d\u2018\u2019\u2026 ").split()
+    if not words:
+        return ""
+    match = re.search(r"\s+".join(re.escape(word) for word in words), text, re.IGNORECASE)
+    return match.group(0) if match else ""
+
+
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$")
 
 

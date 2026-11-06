@@ -56,7 +56,8 @@ SIDE_FILES = ("", "-journal", "-wal", "-shm")
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS papers (
     key TEXT PRIMARY KEY, id TEXT NOT NULL, title TEXT NOT NULL, url TEXT NOT NULL,
-    text TEXT NOT NULL, source TEXT NOT NULL
+    text TEXT NOT NULL, source TEXT NOT NULL,
+    authors TEXT NOT NULL DEFAULT '', venue TEXT NOT NULL DEFAULT '', year INTEGER, cited_by INTEGER
 );
 CREATE TABLE IF NOT EXISTS searches (
     source TEXT NOT NULL, query TEXT NOT NULL, k INTEGER NOT NULL, papers TEXT NOT NULL, saved TEXT NOT NULL,
@@ -165,10 +166,22 @@ class PaperDatabase:
             with contextlib.suppress(sqlite3.Error):  # readers then never wait for the writer
                 connection.execute("PRAGMA journal_mode=WAL")
             connection.executescript(SCHEMA)
+            self._add_missing_columns(connection)
             yield connection
             connection.commit()
         finally:
             connection.close()
+
+    @staticmethod
+    def _add_missing_columns(connection: sqlite3.Connection) -> None:
+        """A data directory made before authors, venue, year and citations were saved gets those columns."""
+        have = {row[1] for row in connection.execute("PRAGMA table_info(papers)")}
+        for name, kind in (("authors", "TEXT NOT NULL DEFAULT ''"), ("venue", "TEXT NOT NULL DEFAULT ''")):
+            if name not in have:
+                connection.execute(f"ALTER TABLE papers ADD COLUMN {name} {kind}")
+        for name in ("year", "cited_by"):
+            if name not in have:
+                connection.execute(f"ALTER TABLE papers ADD COLUMN {name} INTEGER")
 
     @staticmethod
     def _asked(query: str) -> str:
@@ -189,7 +202,9 @@ class PaperDatabase:
                 found = []
                 for key in json.loads(row[0]):
                     paper = db.execute(
-                        "SELECT id, text, title, url FROM papers WHERE key = ?", (key,)
+                        "SELECT id, text, title, url, authors, venue, year, cited_by "
+                        "FROM papers WHERE key = ?",
+                        (key,),
                     ).fetchone()
                     if paper is None:  # the table was changed by hand: ask again
                         return None
@@ -206,20 +221,40 @@ class PaperDatabase:
                 for passage in found:
                     key = paper_key(passage, source)
                     keys.append(key)
-                    row = db.execute("SELECT text, url, title FROM papers WHERE key = ?", (key,)).fetchone()
+                    row = db.execute(
+                        "SELECT text, url, title, authors, venue, year, cited_by FROM papers WHERE key = ?",
+                        (key,),
+                    ).fetchone()
                     if row is None:
                         db.execute(
-                            "INSERT INTO papers VALUES (?, ?, ?, ?, ?, ?)",
-                            (key, passage.id, passage.title, passage.url, passage.text, source),
+                            "INSERT INTO papers (key, id, title, url, text, source, authors, venue, year, "
+                            "cited_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            (
+                                key,
+                                passage.id,
+                                passage.title,
+                                passage.url,
+                                passage.text,
+                                source,
+                                passage.authors,
+                                passage.venue,
+                                passage.year,
+                                passage.cited_by,
+                            ),
                         )
                     else:
-                        text, url, title = row
+                        text, url, title, authors, venue, year, cited_by = row
                         db.execute(
-                            "UPDATE papers SET text = ?, url = ?, title = ? WHERE key = ?",
+                            "UPDATE papers SET text = ?, url = ?, title = ?, authors = ?, venue = ?, "
+                            "year = ?, cited_by = ? WHERE key = ?",
                             (
                                 passage.text if len(passage.text) > len(text) else text,
                                 url or passage.url,
                                 title or passage.title,
+                                authors or passage.authors,
+                                venue or passage.venue,
+                                year if year is not None else passage.year,
+                                passage.cited_by if passage.cited_by is not None else cited_by,
                                 key,
                             ),
                         )

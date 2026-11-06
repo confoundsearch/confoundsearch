@@ -254,6 +254,109 @@ class TestTheBuilder:
         assert kept == ["new"]
 
 
+class TestFillingInTheDetails:
+    def test_papers_are_named_to_semantic_scholar_by_corpus_id_or_doi(self):
+        builder = load_builder()
+        assert builder.s2_id("42", "https://openalex.org/W1") == "CorpusId:42"
+        assert builder.s2_id("W9", "https://doi.org/10.1/x") == "DOI:10.1/x"
+        assert builder.s2_id("W9", "https://openalex.org/W9") is None
+
+    @staticmethod
+    def papers(path, *passages):
+        PaperDatabase(path).save("s", "q", 9, list(passages))
+        wait_for_writes()
+
+    @staticmethod
+    def row(path, ident):
+        db = sqlite3.connect(path)
+        try:
+            return db.execute(
+                "SELECT authors, venue, year, cited_by FROM papers WHERE id = ?", (ident,)
+            ).fetchone()
+        finally:
+            db.close()
+
+    def test_details_are_filled_in_by_id_then_by_title_where_it_knows_the_paper(self, tmp_path, monkeypatch):
+        builder = load_builder()
+        path = tmp_path / "d.sqlite3"
+        self.papers(
+            path,
+            Passage("42", "one", "One", "u"),  # known by corpus id
+            Passage("W9", "two", "Two", "https://doi.org/10.1/x"),  # not known by its DOI ...
+            Passage("W7", "three", "Three Words Here", "https://openalex.org/W7"),  # ... found by its title
+            Passage(
+                "W8", "four", "Four Elsewhere", "https://openalex.org/W8"
+            ),  # a different title comes back
+            Passage("W6", "five", "", "https://openalex.org/W6"),  # no title to ask by
+            Passage("5", "six", "Six", "u", "Kept", "Kept V", 1990, 7),  # already has details
+        )
+        asked = []
+        one = {
+            "authors": [{"name": "A. One"}],
+            "journal": {"name": "A Journal"},
+            "year": 2001,
+            "citationCount": 9,
+        }
+
+        def transport(url, headers, body, timeout):
+            if body is not None:  # the batch: the second paper is one it does not know
+                asked.append(json.loads(body)["ids"])
+                return json.dumps([one, None]).encode()
+            asked.append(url.split("query=")[1].split("&")[0])  # a title search
+            if "Three" in url:
+                return json.dumps(
+                    {
+                        "data": [
+                            {"title": "Three words here", "authors": [], "year": 1980, "citationCount": 12}
+                        ]
+                    }
+                ).encode()
+            return json.dumps({"data": [{"title": "Something else"}]}).encode()
+
+        monkeypatch.setattr(builder, "resilient", lambda *a, **k: transport)
+        assert builder.add_metadata(path) == (
+            2,
+            3,
+        )  # two filled; three still lack (two unmatched, one no title)
+        assert asked[0] == ["CorpusId:42", "DOI:10.1/x"]
+        assert sorted(asked[1:]) == ["Four+Elsewhere", "Three+Words+Here", "Two"]
+        assert self.row(path, "42") == ("A. One", "A Journal", 2001, 9)
+        assert self.row(path, "W7") == ("", "", 1980, 12)
+        assert self.row(path, "5") == ("Kept", "Kept V", 1990, 7)
+
+    def test_a_batch_it_rejects_is_left_to_the_title_search(self, tmp_path, monkeypatch):
+        from confoundsearch.errors import HttpError
+
+        builder = load_builder()
+        path = tmp_path / "d.sqlite3"
+        self.papers(path, Passage("42", "one", "A Title Of One", "u"))
+
+        def transport(url, headers, body, timeout):
+            if body is not None:
+                raise HttpError("HTTP 400 from the batch", 400)
+            return json.dumps(
+                {"data": [{"title": "A title of one", "year": 2000, "citationCount": 4}]}
+            ).encode()
+
+        monkeypatch.setattr(builder, "resilient", lambda *a, **k: transport)
+        assert builder.add_metadata(path) == (1, 0) and self.row(path, "42") == ("", "", 2000, 4)
+
+    def test_a_file_from_before_the_columns_existed_is_brought_up_to_date_first(self, tmp_path, monkeypatch):
+        builder = load_builder()
+        path = tmp_path / "old.sqlite3"
+        db = sqlite3.connect(path)
+        db.executescript(
+            "CREATE TABLE papers (key TEXT PRIMARY KEY, id TEXT NOT NULL, title TEXT NOT NULL, "
+            "url TEXT NOT NULL, text TEXT NOT NULL, source TEXT NOT NULL);"
+            "INSERT INTO papers VALUES ('k', '42', 'Old', 'u', 'text', 's');"
+        )
+        db.commit()
+        db.close()
+        reply = [{"authors": [{"name": "A. One"}], "year": 1999, "citationCount": 3}]
+        monkeypatch.setattr(builder, "resilient", lambda *a, **k: lambda *args: json.dumps(reply).encode())
+        assert builder.add_metadata(path) == (1, 0)
+
+
 class TestThePrewarmedCache:
     def source(self, tmp_path):
         path = tmp_path / "shipped.sqlite3"
@@ -395,6 +498,9 @@ class TestScrubbing:
         assert not [t for t in texts if builder.EMAIL.search(t)]
 
 
+REAL_MAIN = cli.main  # before a test replaces it
+
+
 class TestTheDemoCommand:
     KEYS = ("OPENAI_API_KEY", "OPENROUTER_API_KEY", "OPENAI_BASE_URL")
 
@@ -463,6 +569,31 @@ class TestTheDemoCommand:
             "--corpus" not in argv and argv[argv.index("--confounds") + 1] == "4"
         )  # its cache is pre-warmed
         assert "curated" not in capsys.readouterr().err  # no curated note: these are real searches
+
+    def argv_for(self, monkeypatch, *argv):
+        seen = []
+        monkeypatch.setattr(cli, "main", lambda argv=None: seen.append(list(argv)) or 0)
+        REAL_MAIN(["demo", "--no-open", *argv])
+        return seen[0]
+
+    def test_a_cached_run_is_paced_so_that_it_can_be_watched(self, monkeypatch):
+        monkeypatch.setattr(cli, "DEMO_PACE", 0.012)
+        replay = self.argv_for(monkeypatch)  # no key: it replays the recording
+        assert replay[replay.index("--pace") + 1] == "0.012" and "--replay" in replay
+        monkeypatch.setenv("OPENAI_API_KEY", "k")
+        curated = self.argv_for(monkeypatch)  # a key, the shipped example: its answers are cached too
+        assert curated[curated.index("--pace") + 1] == "0.012"
+
+    def test_a_live_run_with_a_key_is_not_slowed(self, monkeypatch):
+        monkeypatch.setattr(cli, "DEMO_PACE", 0.012)
+        monkeypatch.setenv("OPENAI_API_KEY", "k")
+        assert "--pace" not in self.argv_for(monkeypatch, "--live")
+        monkeypatch.delenv("OPENAI_API_KEY")
+        assert "--pace" in self.argv_for(monkeypatch, "--live")  # but replaying the live recording is paced
+
+    def test_no_pause_is_asked_for_when_the_pace_is_zero(self, monkeypatch):
+        monkeypatch.setattr(cli, "DEMO_PACE", 0.0)
+        assert "--pace" not in self.argv_for(monkeypatch)
 
     def test_the_number_of_confounds_can_be_chosen(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "k")

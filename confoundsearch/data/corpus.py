@@ -24,9 +24,22 @@ class InMemoryCorpus:
 
     @classmethod
     def from_jsonl(cls, path: str | Path) -> InMemoryCorpus:
-        """One JSON object per line with `id` and `text`, and optionally `title` and `url`."""
+        """One JSON object per line with `id` and `text`, and optionally `title`, `url`, `authors`, `venue`,
+        `year` and `cited_by`."""
         rows = [json.loads(line) for line in Path(path).read_text().splitlines() if line.strip()]
-        return cls(Passage(str(r["id"]), r["text"], r.get("title", ""), r.get("url", "")) for r in rows)
+        return cls(
+            Passage(
+                str(r["id"]),
+                r["text"],
+                r.get("title", ""),
+                r.get("url", ""),
+                str(r.get("authors") or ""),
+                str(r.get("venue") or ""),
+                r.get("year"),
+                r.get("cited_by"),
+            )
+            for r in rows
+        )
 
     def search(self, query: str, k: int) -> list[Passage]:
         words = set(normalize(query).split())

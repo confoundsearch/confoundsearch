@@ -11,11 +11,11 @@ The file is a saved-searches database (`confoundsearch.data.cache`) built by `de
 
 from __future__ import annotations
 
-import contextlib
 import math
 import shutil
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 from confoundsearch.data.cache import database_path
 from confoundsearch.errors import CorpusError
@@ -56,6 +56,22 @@ class DemoCorpus:
         self._papers: list[tuple[Passage, dict[str, int]]] | None = None
         self._idf: dict[str, float] = {}
 
+    @staticmethod
+    def _rows(db: sqlite3.Connection, joined: bool, last: bool = False) -> list[tuple[Any, ...]]:
+        """The papers of the example set (`joined`), or every paper. A file from before authors, venue, year
+        and citations were saved has no such columns; its papers come without them."""
+        join = " JOIN example_papers e ON e.key = p.key" if joined else ""
+        for columns in (
+            "p.id, p.text, p.title, p.url, p.authors, p.venue, p.year, p.cited_by",
+            "p.id, p.text, p.title, p.url",
+        ):
+            try:
+                return db.execute(f"SELECT {columns} FROM papers p{join} ORDER BY p.key").fetchall()  # noqa: S608
+            except sqlite3.OperationalError:
+                if last and columns.endswith("p.url"):
+                    raise  # not even the old columns: the file is not a papers database
+        return []  # no example set in this file: the caller uses every paper
+
     def _load(self) -> list[tuple[Passage, dict[str, int]]]:
         if self._papers is None:
             if not self.path.is_file():
@@ -64,16 +80,7 @@ class DemoCorpus:
                 f"{self.path.resolve().as_uri()}?mode=ro", uri=True
             )  # installs may be read-only
             try:
-                rows = []
-                with contextlib.suppress(
-                    sqlite3.OperationalError
-                ):  # no example set in this file: use every paper
-                    rows = db.execute(
-                        "SELECT p.id, p.text, p.title, p.url FROM papers p "
-                        "JOIN example_papers e ON e.key = p.key ORDER BY p.key"
-                    ).fetchall()
-                if not rows:
-                    rows = db.execute("SELECT id, text, title, url FROM papers ORDER BY key").fetchall()
+                rows = self._rows(db, joined=True) or self._rows(db, joined=False, last=True)
             except sqlite3.Error as err:
                 raise CorpusError(f"the demo papers could not be read: {err}") from err
             finally:

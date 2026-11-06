@@ -15,6 +15,7 @@ from confoundsearch.data.demo import RECORDED_MODEL
 from confoundsearch.data.es import ElasticsearchCorpus
 from confoundsearch.data.multi import MultiCorpus
 from confoundsearch.data.sources import OpenAlexCorpus, SemanticScholarCorpus
+from confoundsearch.errors import BudgetReached, RemoteError, ReplayMiss
 from confoundsearch.interface import cli
 from confoundsearch.interface.server import RunManager
 from confoundsearch.logic.audit import AuditedClient, AuditLog, AuditTrail
@@ -177,10 +178,15 @@ class ScriptedClient:
             return json.dumps({"confounds": ["firm size", "firm age"]})
         if '{"synonyms"' in prompt:
             return json.dumps({"synonyms": ["head count"] if "size" in prompt else []})
-        if "JSON lines only" in prompt:  # the synthesis: every passage supports "firm size" affecting X
+        if "copy word for word" in prompt:  # the highlights: the whole of each text is "the best sentence"
+            blocks = re.findall(r"^id: (.+)\ntext: (.+)$", prompt, flags=re.M)
+            return "\n".join(json.dumps({"id": i, "sentence": t}) for i, t in blocks)
+        if "JSON lines only" in prompt:  # the synthesis: every passage supports "firm size" affecting X and Y
             ids = re.findall(r"^id: (.+)$", prompt, flags=re.M)
             return "\n".join(
-                json.dumps({"confound": "firm size", "side": "X", "id": i, "quote": ""}) for i in ids
+                json.dumps({"confound": "firm size", "side": side, "id": i, "quote": ""})
+                for i in ids
+                for side in ("X", "Y")
             )
         return "yes"
 
@@ -678,7 +684,37 @@ class TestProgress:
         ]
         assert cli.main([*argv, "--out", str(tmp_path / "p.html")]) == 0
         err = capsys.readouterr().err
-        assert err.startswith("\u201c[T]he theorist is overloaded by demands") and "Karl Weick" in err
+        assert err.startswith("\n    \u201c[T]he theorist is overloaded by demands") and "Karl Weick" in err
+        assert "#" not in err.split("Karl Weick")[0]  # set off by space alone
+        assert "(1989, p. 529)\n\n" in err  # and a blank line after it
+
+
+def test_set_off_indents_each_line_and_leaves_a_blank_line_above_and_below():
+    assert cli.set_off("one\n  two") == "\n    one\n      two\n"
+    assert cli.set_off("one", indent=2) == "\n  one\n"
+
+
+def test_a_status_line_already_showing_is_wiped_before_what_comes_next():
+    class Terminal:
+        def __init__(self):
+            self.written = []
+
+        def isatty(self):
+            return True
+
+        def write(self, text):
+            self.written.append(text)
+
+        def flush(self):
+            pass
+
+    stream = Terminal()
+    status = cli.StatusLine(stream)
+    status.wipe()  # nothing showing: nothing written
+    assert stream.written == []
+    status({"event": "run_started"})
+    status.wipe()
+    assert stream.written[-1] == "\r\x1b[K"
 
 
 class TestSetup:
@@ -889,3 +925,60 @@ class TestThePolicy:
         from confoundsearch import DeterministicPolicy
 
         assert isinstance(deterministic.policy_factory(None), DeterministicPolicy)
+
+
+def page_evidence(page):
+    """The evidence panels of a result page, as the page holds them (a JSON object in its script)."""
+    return json.loads(re.search(r"var EVIDENCE_BLOB = (\{.*?\});\n", page.read_text(), re.S).group(1))
+
+
+class TestTheBestSentenceAndThePace:
+    """After the search, a model call per link marks the best sentence; --pace slows a replay."""
+
+    run_default = TestThePolicy.run_default
+
+    def test_the_cited_papers_come_with_their_best_sentence_marked(self, tmp_path, monkeypatch, env):
+        trail = self.run_default(tmp_path, monkeypatch, env, "--confounds", "1")
+        asked = [e.data["messages"][-1]["content"] for e in trail.of_kind("model_call")]
+        assert any("copy word for word" in prompt for prompt in asked)
+        kinds = [e.kind for e in trail.events]
+        assert max(i for i, k in enumerate(kinds) if k == "model_call") < kinds.index(
+            "run_finished"
+        )  # logged
+        assert "hl" in "".join(page_evidence(tmp_path / "r.html").values()) and "<mark" in "".join(
+            page_evidence(tmp_path / "r.html").values()
+        )
+
+    def test_no_highlights_skips_that_call(self, tmp_path, monkeypatch, env):
+        trail = self.run_default(tmp_path, monkeypatch, env, "--confounds", "1", "--no-highlights")
+        asked = [e.data["messages"][-1]["content"] for e in trail.of_kind("model_call")]
+        assert not any("copy word for word" in prompt for prompt in asked)
+        assert "<mark" not in "".join(page_evidence(tmp_path / "r.html").values())
+
+    @pytest.mark.parametrize(
+        "failure", [RemoteError("down"), ReplayMiss("no saved reply"), BudgetReached("spent")]
+    )
+    def test_a_failure_there_costs_only_the_marking(self, tmp_path, monkeypatch, env, failure):
+        class Broken:
+            def __init__(self, client):
+                pass
+
+            def __call__(self, *args):
+                raise failure
+
+        monkeypatch.setattr(cli, "LLMHighlights", Broken)
+        trail = self.run_default(tmp_path, monkeypatch, env, "--confounds", "1")
+        assert trail.of_kind("run_finished")[0].data["reason"] == "stop_action"
+        assert "<mark" not in "".join(page_evidence(tmp_path / "r.html").values())
+        log = [json.loads(line)["event"] for line in (tmp_path / "r.log.jsonl").read_text().splitlines()]
+        assert "highlights_skipped" in log
+
+    def test_pace_waits_after_each_step(self, tmp_path, monkeypatch, env):
+        waits = []
+        monkeypatch.setattr(cli.time, "sleep", lambda seconds: waits.append(seconds))
+        trail = self.run_default(tmp_path, monkeypatch, env, "--confounds", "1", "--pace", "0.25")
+        steps = len(trail.of_kind("action"))
+        assert waits.count(0.25) == steps > 0
+        waits.clear()
+        self.run_default(tmp_path, monkeypatch, env, "--confounds", "1")  # no --pace: no waiting
+        assert 0.25 not in waits

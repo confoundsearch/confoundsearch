@@ -63,9 +63,46 @@ def byline(entry: dict[str, Any]) -> str:
     return " · ".join(p for p in parts if p)
 
 
-def quotation(text: str) -> str:
-    text = text if len(text) <= QUOTE_LIMIT else text[:QUOTE_LIMIT].rstrip() + "…"
-    return f"“{html.escape(text)}”"
+def _whole_words(text: str, low: int, high: int, keep: int) -> int:
+    """`high` moved back to the end of a whole word, but never to before `keep` (the highlight must stay)."""
+    if high >= len(text):
+        return high
+    cut = text.rfind(" ", max(low, keep), high)
+    return cut if cut > 0 else high
+
+
+def quotation(text: str, highlight: str = "") -> str:
+    """The passage in quotation marks, cut (at a word) to QUOTE_LIMIT. The `highlight` sentence is marked."""
+    at = text.find(highlight) if highlight else -1
+    end = at + len(highlight) if at >= 0 else 0
+    low, high = 0, min(len(text), QUOTE_LIMIT)
+    if at >= 0 and end > high:  # the sentence would be cut off: show the stretch around it
+        high = min(len(text), end + (QUOTE_LIMIT - len(highlight)) // 4)
+        low = max(0, high - QUOTE_LIMIT)
+        space = text.find(" ", low) if low else -1
+        low = min(at, space + 1 if space >= 0 else low)  # start at a word, never after the highlight
+    high = _whole_words(text, low, high, end)
+    lead, trail = "\u2026" if low else "", "\u2026" if high < len(text) else ""
+    if at < 0:
+        return f"\u201c{lead}{html.escape(text[low:high].rstrip())}{trail}\u201d"
+    before, mark, after = text[low:at], text[at:end], text[end:high].rstrip()
+    marked = f'{html.escape(before)}<mark class="hl"><b>{html.escape(mark)}</b></mark>{html.escape(after)}'
+    return f"\u201c{lead}{marked}{trail}\u201d"
+
+
+def byline_html(entry: dict[str, Any]) -> str:
+    """Authors, venue (in italics), year and how often it is cited, under the title."""
+    parts = []
+    if entry.get("authors"):
+        parts.append(f'<span class="authors">{html.escape(str(entry["authors"]))}</span>')
+    if entry.get("venue"):
+        parts.append(f'<span class="venue">{html.escape(str(entry["venue"]))}</span>')
+    if entry.get("year"):
+        parts.append(f'<span class="year">{html.escape(str(entry["year"]))}</span>')
+    cited = entry.get("cited_by")
+    if cited:
+        parts.append(f'<span class="cites">cited {cited:,}\u00d7</span>')
+    return '<span class="sep">\u00b7</span>'.join(parts)
 
 
 def passage(entry: dict[str, Any], first: bool, name: str, target: str) -> str:
@@ -79,10 +116,10 @@ def passage(entry: dict[str, Any], first: bool, name: str, target: str) -> str:
         f'<div class="supports">Supports: {html.escape(name)} \u2192 {html.escape(target)}</div>',
     ]
     if entry.get("quote"):
-        lines.append(f'<p class="quote">{quotation(entry["quote"])}</p>')
+        lines.append(f'<p class="quote">{quotation(entry["quote"], str(entry.get("highlight") or ""))}</p>')
     lines.append(f'<p class="title"><b>{link}</b></p>')
-    if byline(entry):
-        lines.append(f'<p class="byline">{html.escape(byline(entry))}</p>')
+    if byline_html(entry):
+        lines.append(f'<p class="byline">{byline_html(entry)}</p>')
     lines.append("</div>")
     return "\n".join(lines)
 

@@ -26,8 +26,10 @@ import shutil
 import sqlite3
 import sys
 import tempfile
+import urllib.parse
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 from confoundsearch.data.cache import PaperDatabase, call_key, database_path, paper_key, wait_for_writes
 from confoundsearch.data.corpus import Corpus
@@ -41,7 +43,7 @@ from confoundsearch.data.demo import (
 )
 from confoundsearch.data.multi import title_key
 from confoundsearch.data.sources import OpenAlexCorpus, SemanticScholarCorpus
-from confoundsearch.errors import RemoteError
+from confoundsearch.errors import HttpError, RemoteError
 from confoundsearch.http import resilient, urllib_transport
 from confoundsearch.logic.graph import Passage
 
@@ -171,6 +173,75 @@ def save_curated_confounds(work: Path) -> None:
     PaperDatabase(database_path(work, DEMO_QUESTION)).save_call(
         call_key(RECORDED_MODEL, temperature_for(RECORDED_MODEL), sent[0]), RECORDED_MODEL, sent[0], reply
     )
+
+
+S2_FIELDS = "title,year,venue,journal,publicationVenue,authors,citationCount"
+S2_BATCH = f"https://api.semanticscholar.org/graph/v1/paper/batch?fields={S2_FIELDS}"
+
+
+def s2_id(paper_id: str, url: str) -> str | None:
+    """How Semantic Scholar names a saved paper: a corpus id (a number) or a DOI; None if neither is known."""
+    if paper_id.isdigit():
+        return f"CorpusId:{paper_id}"
+    prefix = "https://doi.org/"
+    return f"DOI:{url[len(prefix) :]}" if url.startswith(prefix) else None
+
+
+S2_SEARCH = "https://api.semanticscholar.org/graph/v1/paper/search?"
+
+
+def add_metadata(path: Path, batch: int = 200) -> tuple[int, int]:
+    """Fill in authors, venue, year and citation counts for saved papers that lack them.
+
+    Asks Semantic Scholar by id in batches, then by title for the papers it did not know by id (accepting only
+    a result with the very same title). Returns (papers filled in, papers still without). A paper it cannot
+    find keeps what it had: the page shows no byline for it and ranks it last.
+    """
+    from confoundsearch.data.sources import authors_text, venue_text
+
+    transport = resilient(urllib_transport, min_interval=1.1)
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    if os.environ.get("S2_KEY"):
+        headers["x-api-key"] = os.environ["S2_KEY"]
+    filled = 0
+
+    def fill(db: sqlite3.Connection, key: str, paper: dict[str, Any]) -> None:
+        names = authors_text([(a or {}).get("name") or "" for a in paper.get("authors") or []])
+        db.execute(
+            "UPDATE papers SET authors = ?, venue = ?, year = ?, cited_by = ? WHERE key = ?",
+            (names, venue_text(paper), paper.get("year"), paper.get("citationCount"), key),
+        )
+
+    with contextlib.closing(sqlite3.connect(path)) as db:
+        PaperDatabase._add_missing_columns(db)  # a file made before these were saved gets the columns first
+        lacking = "SELECT key, id, url, title FROM papers WHERE cited_by IS NULL AND authors = ''"
+        todo = [
+            (key, ident) for key, pid, url, _ in db.execute(lacking).fetchall() if (ident := s2_id(pid, url))
+        ]
+        for start in range(0, len(todo), batch):
+            chunk = todo[start : start + batch]
+            body = json.dumps({"ids": [ident for _, ident in chunk]}).encode()
+            try:
+                found = json.loads(transport(S2_BATCH, headers, body, 60))
+            except HttpError:  # one id it cannot parse fails the whole batch: these go by title instead
+                continue
+            for (key, _), paper in zip(chunk, found):
+                if paper:
+                    fill(db, key, paper)
+                    filled += 1
+            db.commit()
+        for key, _, _, title in db.execute(lacking).fetchall():  # the rest, by title
+            if not title_key(title):
+                continue
+            query = urllib.parse.urlencode({"query": title, "limit": 3, "fields": S2_FIELDS})
+            found = json.loads(transport(S2_SEARCH + query, headers, None, 60)).get("data") or []
+            match = next((p for p in found if title_key(p.get("title") or "") == title_key(title)), None)
+            if match:
+                fill(db, key, match)
+                filled += 1
+        db.commit()
+        left = db.execute("SELECT COUNT(*) FROM papers WHERE cited_by IS NULL AND authors = ''").fetchone()[0]
+    return filled, left
 
 
 def scrub_papers(path: Path) -> int:
@@ -304,6 +375,11 @@ def main(argv: list[str] | None = None) -> int:
         "so `confoundsearch demo` replays it with no key",
     )
     parser.add_argument(
+        "--metadata",
+        action="store_true",
+        help="fill in authors, venue, year and citation counts for the saved papers (Semantic Scholar)",
+    )
+    parser.add_argument(
         "--curate",
         action="store_true",
         help="build the curated example (known studies, three named confounds) and record its run "
@@ -345,6 +421,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{failed} of {asked} searches failed; nothing written", file=sys.stderr)
         shutil.rmtree(work, ignore_errors=True)
         return 1
+    if args.metadata:
+        wait_for_writes()
+        filled, lacking = add_metadata(database.path)
+        print(f"  metadata: {filled} papers filled in, {lacking} still without", file=sys.stderr)
     if args.models:
         from confoundsearch.interface import cli
 

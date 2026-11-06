@@ -501,7 +501,9 @@ class TestStatusLine:
         status(self.asked("asking_model"))
         drawn = out.getvalue().split("\r\x1b[K")[1:]
         assert "searching openalex.org for 'x'" in drawn[0] and "1:15" in drawn[0] and "step 0/20" in drawn[0]
-        assert "choosing the next move" in drawn[1] and "step 3/20" in drawn[1] and "\u03a6 1.25" in drawn[1]
+        assert (
+            "choosing the next action" in drawn[1] and "step 3/20" in drawn[1] and "\u03a6 1.25" in drawn[1]
+        )
         assert "asking the model" in drawn[2]
         assert "\n" not in out.getvalue()
         status.stop()

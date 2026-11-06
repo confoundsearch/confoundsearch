@@ -11,7 +11,7 @@ Scholar withholds many abstracts, so there a paper without one is kept, with its
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 from urllib.parse import urlencode
 
@@ -60,7 +60,8 @@ class SemanticScholarCorpus:
             {
                 "query": query,
                 "limit": _page_size(k),
-                "fields": "title,abstract,tldr,url,year,citationCount,corpusId",
+                "fields": "title,abstract,tldr,url,year,citationCount,corpusId,authors,venue,journal,"
+                "publicationVenue",
             }
         )
         headers = {"Accept": "application/json"}
@@ -90,7 +91,27 @@ class SemanticScholarCorpus:
             text=cls._text(paper),
             title=paper.get("title") or "",
             url=paper.get("url") or "",
+            authors=authors_text([(a or {}).get("name") or "" for a in paper.get("authors") or []]),
+            venue=venue_text(paper),
+            year=paper.get("year"),
+            cited_by=paper.get("citationCount"),
         )
+
+
+def authors_text(names: Sequence[str], shown: int = 3) -> str:
+    """The first few authors, then "et al.": "Maria Guadalupe, Hongyi Li, Julie Wulf"."""
+    named = [" ".join(n.split()) for n in names if isinstance(n, str) and n.strip()]
+    return ", ".join(named[:shown]) + (" et al." if len(named) > shown else "")
+
+
+def venue_text(paper: Mapping[str, Any]) -> str:
+    """Semantic Scholar's venue, else the journal it names, else its publication venue."""
+    named = (
+        paper.get("venue"),
+        (paper.get("journal") or {}).get("name"),
+        (paper.get("publicationVenue") or {}).get("name"),
+    )
+    return next((str(name) for name in named if name), "")
 
 
 def abstract_from_inverted_index(inverted: Mapping[str, list[int]]) -> str:
@@ -120,7 +141,8 @@ class OpenAlexCorpus:
         params = {
             "search": query,
             "per_page": _page_size(k),
-            "select": "id,title,abstract_inverted_index,doi,publication_year",
+            "select": "id,title,abstract_inverted_index,doi,publication_year,cited_by_count,"
+            "authorships,primary_location",
         }
         if self.api_key:
             params["api_key"] = self.api_key
@@ -150,4 +172,13 @@ class OpenAlexCorpus:
             text=abstract_from_inverted_index(work["abstract_inverted_index"]),
             title=work.get("title") or "",
             url=work.get("doi") or work["id"],
+            authors=authors_text(
+                [
+                    ((a or {}).get("author") or {}).get("display_name") or ""
+                    for a in work.get("authorships") or []
+                ]
+            ),
+            venue=(((work.get("primary_location") or {}).get("source")) or {}).get("display_name") or "",
+            year=work.get("publication_year"),
+            cited_by=work.get("cited_by_count"),
         )

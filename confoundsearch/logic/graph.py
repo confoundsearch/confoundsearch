@@ -29,12 +29,16 @@ def normalize(text: str) -> str:
 
 @dataclass(frozen=True)
 class Passage:
-    """A passage of the corpus D. `title` and `url` are optional and only used for display."""
+    """A passage of the corpus D. Everything but `id` and `text` is optional and only used for display."""
 
     id: str
     text: str
     title: str = ""
     url: str = ""
+    authors: str = ""  # "A. Author, B. Author et al.", as a source gives them
+    venue: str = ""  # the journal or conference
+    year: int | None = None
+    cited_by: int | None = None  # how many papers cite it, where the source says
 
     def __post_init__(self) -> None:
         if not self.id:

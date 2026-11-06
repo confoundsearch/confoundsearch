@@ -45,7 +45,16 @@ h1{font-size:1.3em;}
   border-radius:10px;padding:1px 9px;margin-bottom:7px;}
 .quote{margin:0 0 8px;font-size:15px;line-height:1.55;font-style:italic;color:var(--ink);}
 .title{margin:0;font-size:13px;}
-.byline{margin:1px 0 0;font-size:12px;color:var(--ink-faint);}
+.byline{margin:2px 0 0;font-size:12px;line-height:1.7;color:var(--ink-faint);}
+.byline .authors{color:var(--ink-soft);}
+.byline .venue{font-style:italic;}
+.byline .sep{margin:0 7px;opacity:.55;}
+.byline .cites{display:inline-block;border:1px solid var(--rule);border-radius:9px;padding:0 8px;font-size:11px;
+  line-height:1.5;color:var(--ink-soft);background:var(--rule-soft);}
+.quote mark.hl{background:rgba(250,204,21,.4);background:color-mix(in srgb,var(--c,#e0b400) 26%,transparent);
+  color:inherit;border-radius:2px;padding:0 1px;font-style:normal;box-decoration-break:clone;
+  -webkit-box-decoration-break:clone;}
+.quote mark.hl b{font-weight:600;}
 .also{margin-top:6px;border:1px dashed #c4cbd5;border-radius:4px;padding:9px 12px;font-size:13px;color:#566;}
 .evidence-content b{font-weight:600;}
 .evidence-box,.md-card-list{scrollbar-width:thin;scrollbar-color:var(--rule) transparent;}

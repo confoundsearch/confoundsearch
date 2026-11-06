@@ -71,12 +71,14 @@ def run_episode(
     on_step: Callable[[Step], None] | None = None,
     should_stop: Callable[[], bool] | None = None,
     audit: AuditLog | None = None,
+    finalize: Callable[[State], None] | None = None,
 ) -> Trajectory:
     """Run one episode and keep its audit log.
 
     `on_step` sees each step as it happens; `should_stop` is polled before each one. The log is always kept
     (see `confoundsearch.logic.audit`); pass `audit=AuditLog(path)` to also stream it to a file as it goes.
-    If the log cannot be written the run fails rather than carry on unrecorded.
+    If the log cannot be written the run fails rather than carry on unrecorded. `finalize` sees the final
+    state after the last step and before the log's closing record, so what it asks the model is logged too.
     """
     log = audit if audit is not None else AuditLog()
     state = env.initial_state(x, y)
@@ -108,6 +110,8 @@ def run_episode(
         except BaseException as err:
             log.record("run_failed", error=f"{type(err).__name__}: {err}", steps=len(trajectory.steps))
             raise
+        if finalize is not None:
+            finalize(trajectory.final)
         log.step = len(trajectory.steps)
         record_finish(log, reason, len(trajectory.steps), trajectory.final)
     return trajectory
