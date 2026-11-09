@@ -535,3 +535,92 @@ class TestTheLicence:
 
     def test_the_readme_says_so(self):
         assert "license-MIT" in (ROOT / "README.md").read_text()  # PyPI shows the licence from the metadata
+
+
+PYPI_RELEASE = {
+    "urls": [
+        {"filename": "confoundsearch-1.0.tar.gz", "url": "https://files/x.tar.gz"},
+        {"filename": "confoundsearch-1.0-py3-none-any.whl", "url": "https://files/x.whl"},
+    ]
+}
+
+
+class TestTheUploadedFile:
+    """`--exact-file`: install the wheel the JSON API names, so a stale CDN list cannot fail a release."""
+
+    def test_the_wheel_address_comes_from_the_json_api(self):
+        asked = []
+        url = smoke.released_file(
+            "confoundsearch", "1.0", fetch=lambda u, *a: asked.append(u) or PYPI_RELEASE
+        )
+        assert url == "https://files/x.whl" and asked == ["https://pypi.org/pypi/confoundsearch/1.0/json"]
+
+    def test_it_tries_again_while_the_api_has_no_wheel_then_gives_up(self):
+        import urllib.error
+
+        replies = iter([urllib.error.URLError("404"), {"urls": []}, PYPI_RELEASE])
+        sleeps = []
+
+        def fetch(url, *args):
+            reply = next(replies)
+            if isinstance(reply, Exception):
+                raise reply
+            return reply
+
+        assert (
+            smoke.released_file("c", "1", retries=2, wait=3, sleep=sleeps.append, fetch=fetch)
+            == "https://files/x.whl"
+        )
+        assert sleeps == [3, 3]
+        with pytest.raises(SystemExit, match="has no wheel for c 1"):
+            smoke.released_file(
+                "c", "1", retries=1, wait=0, sleep=lambda s: None, fetch=lambda *a: {"urls": []}
+            )
+
+    def test_testpypi_has_its_own_api(self):
+        assert smoke.json_api_for("https://test.pypi.org/simple/") == "https://test.pypi.org"
+        assert (
+            smoke.json_api_for(None) == smoke.json_api_for("https://pypi.org/simple/") == "https://pypi.org"
+        )
+
+    def test_whether_the_package_list_shows_the_version_yet(self):
+        import urllib.error
+
+        asked = []
+
+        def fetch(url, accept):
+            asked.append((url, accept))
+            return {"versions": ["0.9", "1.0"]}
+
+        assert smoke.index_lists("c", "1.0", fetch=fetch) and not smoke.index_lists("c", "2.0", fetch=fetch)
+        assert asked[0] == ("https://pypi.org/simple/c/", "application/vnd.pypi.simple.v1+json")
+        assert smoke.index_lists("c", "1.0", "https://test.pypi.org/simple", fetch=fetch)
+        assert asked[-1][0] == "https://test.pypi.org/simple/c/"
+
+        def down(*args):
+            raise urllib.error.URLError("no network")
+
+        assert smoke.index_lists("c", "1.0", fetch=down) is False
+
+    @pytest.mark.parametrize("listed", [True, False])
+    def test_exact_file_installs_that_file_and_only_notes_a_stale_list(self, monkeypatch, capsys, listed):
+        seen = []
+        monkeypatch.setattr(
+            smoke, "released_file", lambda name, version, api, retries, wait: f"{api}/{name}-{version}.whl"
+        )
+        monkeypatch.setattr(smoke, "smoke", lambda *args: seen.append(args) or ["works"])
+        monkeypatch.setattr(smoke, "index_lists", lambda *args: listed)
+        assert smoke.main(["confoundsearch==1.0", "--exact-file", "--retries", "2"]) == 0
+        assert seen == [("https://pypi.org/confoundsearch-1.0.whl", None, 0, 15.0, None)]
+        out = capsys.readouterr().out
+        assert "ok  works" in out
+        assert ("finds it" in out) is listed and ("does not show 1.0 yet" in out) is (not listed)
+
+    def test_verify_published_uses_the_exact_file(self):
+        recipe = (
+            (Path(__file__).parent.parent / "justfile")
+            .read_text()
+            .split("verify-published index=")[1]
+            .split("\n\n")[0]
+        )
+        assert recipe.count("--exact-file") == 2

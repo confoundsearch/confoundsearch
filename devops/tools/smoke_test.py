@@ -3,11 +3,16 @@
     python devops/tools/smoke_test.py dist/confoundsearch-0.1.0-py3-none-any.whl     # a built wheel
     python devops/tools/smoke_test.py confoundsearch==0.1.0 --retries 12 --wait 15   # a release, from PyPI
     python devops/tools/smoke_test.py confoundsearch==0.1.0 --index-url https://test.pypi.org/simple/
+    python devops/tools/smoke_test.py confoundsearch==0.1.0 --exact-file   # the very file just uploaded
 
 A target that is not an existing file is installed from the package index, with retries, because a new
 release takes a little while to appear. Checks that the command is installed, that the skill and the page
 asset were packaged, that the public API imports, and that nothing from the repository (tests, assets,
 examples) is needed. Exit status 0 means it works.
+
+With --exact-file, a release is installed from the address PyPI's JSON API gives for its wheel, which is
+there as soon as the upload is. The package list `pip install -U` reads is served through a CDN, and an edge
+of it can show the previous version for a while; that is reported as a note, not a failure.
 """
 
 from __future__ import annotations
@@ -18,9 +23,12 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
+import urllib.request
 import venv
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 PROBE = """
 import pathlib, confoundsearch as c
@@ -64,6 +72,58 @@ def install(
                 raise
             print(f"{target} is not installable yet (try {attempt + 1}); waiting {wait:g}s", file=sys.stderr)
             sleep(wait)
+
+
+def fetch_json(url: str, accept: str = "application/json") -> Any:
+    request = urllib.request.Request(
+        url, headers={"Accept": accept, "User-Agent": "confoundsearch-release-check"}
+    )
+    with urllib.request.urlopen(request, timeout=30) as reply:  # noqa: S310 (an https address we build)
+        return json.loads(reply.read())
+
+
+def json_api_for(index_url: str | None) -> str:
+    """Where to ask about a release: TestPyPI's JSON API for its index, else PyPI's."""
+    return "https://test.pypi.org" if index_url and "test.pypi.org" in index_url else "https://pypi.org"
+
+
+def released_file(
+    name: str,
+    version: str,
+    api: str = "https://pypi.org",
+    retries: int = 0,
+    wait: float = 15.0,
+    sleep: Callable[[float], None] = time.sleep,
+    fetch: Callable[..., Any] = fetch_json,
+) -> str:
+    """The address of the wheel uploaded for `name` `version`, from the JSON API: there as soon as it is."""
+    for attempt in range(retries + 1):
+        try:
+            data = fetch(f"{api}/pypi/{name}/{version}/json")
+            wheels = [f["url"] for f in data.get("urls", []) if str(f.get("filename", "")).endswith(".whl")]
+            if wheels:
+                return str(wheels[0])
+        except (urllib.error.URLError, ValueError, KeyError, TypeError, AttributeError):
+            pass
+        if attempt == retries:
+            raise SystemExit(f"FAILED: {api} has no wheel for {name} {version}")
+        print(
+            f"{name} {version} has no wheel at {api} yet (try {attempt + 1}); waiting {wait:g}s",
+            file=sys.stderr,
+        )
+        sleep(wait)
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
+def index_lists(
+    name: str, version: str, index_url: str | None = None, fetch: Callable[..., Any] = fetch_json
+) -> bool:
+    """Whether the package list pip reads (through the CDN, as this machine sees it) shows `version` yet."""
+    simple = (index_url or "https://pypi.org/simple/").rstrip("/") + f"/{name}/"
+    try:
+        return version in fetch(simple, "application/vnd.pypi.simple.v1+json").get("versions", [])
+    except (urllib.error.URLError, ValueError, AttributeError, TypeError):
+        return False
 
 
 KNOWN = {
@@ -141,8 +201,28 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--wait", type=float, default=15.0, help="seconds between tries")
     parser.add_argument("--python", help="test with this Python version, e.g. 3.8 (needs uv to fetch it)")
+    parser.add_argument(
+        "--exact-file",
+        action="store_true",
+        help="for NAME==VERSION: install the wheel the JSON API names, and only note a stale package list",
+    )
     args = parser.parse_args(argv)
     target = str(Path(args.target).resolve()) if Path(args.target).is_file() else args.target
+    if args.exact_file and "==" in target and not Path(target).is_file():
+        name, version = target.split("==", 1)
+        url = released_file(name, version, json_api_for(args.index_url), args.retries, args.wait)
+        print(f"ok  the uploaded wheel is at {url}")
+        for line in smoke(url, None, 0, args.wait, args.python):
+            print(f"ok  {line}")
+        if index_lists(name, version, args.index_url):
+            print(f"ok  the package list shows {version}: `pip install -U {name}` finds it")
+        else:
+            print(
+                f"note: the package list this machine gets does not show {version} yet. That is PyPI's CDN, "
+                f"which catches up within minutes to hours; until then `pip install -U {name}` finds the "
+                "previous version. The release itself is complete."
+            )
+        return 0
     for line in smoke(target, args.index_url, args.retries, args.wait, args.python):
         print(f"ok  {line}")
     return 0

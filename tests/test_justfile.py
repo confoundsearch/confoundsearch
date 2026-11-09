@@ -164,10 +164,10 @@ class TestWithJustInstalled:
         assert just("verify-published", env=env).returncode == 0
         assert just("verify-published", "testpypi", env=env).returncode == 0
         pypi, testpypi = log.read_text().splitlines()
-        assert pypi == "devops/tools/smoke_test.py confoundsearch==9.9.9 --retries 12 --wait 15"
+        assert pypi == "devops/tools/smoke_test.py confoundsearch==9.9.9 --retries 12 --wait 15 --exact-file"
         assert testpypi == (
             "devops/tools/smoke_test.py confoundsearch==9.9.9 "
-            "--index-url https://test.pypi.org/simple/ --retries 12 --wait 15"
+            "--index-url https://test.pypi.org/simple/ --retries 12 --wait 15 --exact-file"
         )
 
 

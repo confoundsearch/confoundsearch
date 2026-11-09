@@ -192,7 +192,7 @@ verify-published index="pypi":
     set -euo pipefail
     v=$({{py}} -c "import confoundsearch; print(confoundsearch.__version__)")
     if [ "{{index}}" = "testpypi" ]; then
-        {{py}} devops/tools/smoke_test.py "confoundsearch==$v" --index-url https://test.pypi.org/simple/ --retries 12 --wait 15
+        {{py}} devops/tools/smoke_test.py "confoundsearch==$v" --index-url https://test.pypi.org/simple/ --retries 12 --wait 15 --exact-file
     else
-        {{py}} devops/tools/smoke_test.py "confoundsearch==$v" --retries 12 --wait 15
+        {{py}} devops/tools/smoke_test.py "confoundsearch==$v" --retries 12 --wait 15 --exact-file
     fi
