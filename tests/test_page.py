@@ -121,7 +121,8 @@ class TestTheLayout:
 
     def test_the_diagram_has_one_node_and_two_arrows_per_drawn_confound(self):
         html = self.html()
-        assert html.count('class="dag-md-circle"') == 2 and html.count("<line ") == 5  # 4 edges and X to Y
+        assert html.count('class="dag-md-circle"') == 2 and html.count("<line ") == 9  # 4 edges, X to Y,
+        assert html.count('class="edge-hit"') == 4  # and for each edge a wide invisible line to point at
         assert (
             'data-md="IT intensity" data-leg="to_iv"' in html and "dagLegClick('CEO Style','to_dv')" in html
         )
@@ -137,11 +138,20 @@ class TestTheLayout:
             and ".dag-svg.has-sel .dag-count.pill.sel{display:inline;}" in css
         )
 
+    def test_each_arrow_is_easy_to_point_at_and_one_click_target(self):
+        html = self.html()
+        edges = re.findall(r'<g class="edge" onclick="[^"]*">(.*?)</g>', html)
+        assert len(edges) == 4
+        for inner in edges:
+            hit, shown = re.findall(r"<line [^>]*>", inner)
+            assert 'class="edge-hit"' in hit and 'stroke="transparent"' in hit and 'stroke-width="18"' in hit
+            assert (
+                "data-md=" in shown and "data-md=" not in hit
+            )  # the page's script styles only the shown one
+
     def test_an_arrow_with_no_papers_is_dashed(self):
         html = self.html()
-        lines = [
-            line for line in html.splitlines() if line.startswith("<line") and 'data-md="CEO Style"' in line
-        ]
+        lines = re.findall(r'<line [^>]*data-md="CEO Style"[^>]*>', html)
         assert [("stroke-dasharray" in line) for line in lines] == [
             False,
             True,
@@ -256,3 +266,47 @@ class TestTheEvidence:
     def test_papers_are_separated_by_a_rule(self):
         html = self.evidence([paper("One"), paper("Two")], [])["__leg__:Age:to_iv"]
         assert html.count("border-top:1px solid #e6e9ee") == 1  # between the two papers
+
+
+class TestTheWalkthrough:
+    def data(self, *names, example=None):
+        confounds = [(n, [paper(f"{n} x")], [paper(f"{n} y")] if n != "NoY" else []) for n in names]
+        data = share(*confounds)
+        if example is not None:
+            data["walkthrough"] = {"example": example}
+        return data
+
+    def steps(self, html):
+        return json.loads(re.search(r"var TOUR_STEPS = (\[.*?\]);\n", html, re.S).group(1))
+
+    def test_a_page_without_it_has_no_tour_but_still_names_its_regions(self):
+        html = standalone_html(self.data("Age"))
+        assert "TOUR_STEPS" not in html and "tour-card" not in html and "tour-open" not in html
+        assert all(f'data-tour="{r}"' in html for r in ("question", "confounds", "graph", "evidence"))
+
+    def test_it_has_five_steps_built_from_this_result(self):
+        html = standalone_html(self.data("Age", "Size", example="Size"))
+        steps = self.steps(html)
+        assert [s["focus"] for s in steps] == [None, "question", "confounds", "graph", "graph"]
+        assert "<b>X var</b> and <b>Y var</b>" in steps[1]["html"]
+        assert "2 possible confounds, which are" in steps[2]["html"]
+        fourth = steps[3]["html"]
+        assert "Judea Pearl" not in fourth and "The interface itself is a causal graph" in fourth
+        assert '<a href="https://en.wikipedia.org/wiki/Causality_(book)" target="_blank"' in fourth
+        assert ">Pearl, 2020</a>" in fourth and ">Morgan and Winship, 2014</a>" in fourth
+        assert "cambridge.org/core/books/counterfactuals-and-causal-inference" in fourth
+        assert (
+            steps[4]["edge"] == ["Size", "to_dv"] and "<b>Size</b> affects <b>Y var</b>" in steps[4]["html"]
+        )
+        assert html.count('class="tour-dot"') == 5 and 'id="tour-open"' in html
+
+    def test_without_a_usable_example_it_points_at_the_first_confound_with_an_arrow_to_the_outcome(self):
+        steps = self.steps(standalone_html(self.data("NoY", "Size", example="Missing")))
+        assert steps[4]["edge"] == ["Size", "to_dv"]
+        assert "1 possible confound" not in steps[2]["html"]
+
+    def test_one_confound_or_none_with_an_outcome_arrow_reads_right(self):
+        one = self.steps(standalone_html(self.data("Age", example="")))
+        assert "1 possible confound, which is" in one[2]["html"] and "This construct is" in one[4]["html"]
+        none = self.steps(standalone_html(self.data("NoY", example="")))
+        assert none[4]["edge"] is None and "For example" not in none[4]["html"]

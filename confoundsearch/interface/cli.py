@@ -76,7 +76,7 @@ from confoundsearch.logic.audit import current as current_log
 from confoundsearch.logic.deterministic import DeterministicPolicy
 from confoundsearch.logic.episode import ActionSource, Step, Trajectory, run_episode
 from confoundsearch.logic.expand import ExpandedCorpus
-from confoundsearch.logic.graph import Target
+from confoundsearch.logic.graph import Graph, Target
 from confoundsearch.logic.policy import EpsilonGreedy, LookaheadQ, Policy
 from confoundsearch.logic.reward import phi
 from confoundsearch.logic.state import State
@@ -95,6 +95,7 @@ from confoundsearch.model.llm import (
     LLMSynthesis,
     OpenAICompatibleClient,
     Proposer,
+    current_purpose,
     temperature_for,
 )
 from confoundsearch.runlog import RunLog
@@ -104,7 +105,11 @@ EPIGRAPH = (
     "in a head that suffers from bounded rationality.\u201d"
     "\n  \u2014 Karl Weick, Theory Construction as Disciplined Imagination (1989, p. 529)"
 )
-DEMO_PACE = 0.012  # seconds between steps when the demo replays a cached run, so that it can be watched
+DEMO_EXAMPLE = (
+    "market competition"  # the arrow the demo's tour points to: a well-known link with clear papers
+)
+DEMO_PACE = 0.12  # seconds between steps when the demo replays a cached run: about a minute, to be watched
+STATUS_EVERY = 10  # the status line says what the run is doing at every this many steps, not every step
 
 
 def set_off(text: str, indent: int = 4) -> str:
@@ -128,6 +133,39 @@ def describe(action: object) -> str:
     if isinstance(action, Merge):
         return f"Merge({action.a!r}, {action.b!r})  one construct, two names"
     return "Stop()"
+
+
+SOURCE_NAMES = {
+    "semanticscholar": "Semantic Scholar",
+    "openalex": "OpenAlex",
+    "elasticsearch": "the hosted index",
+    "service": "the keyword service",
+    "file": "your papers file",
+}
+
+
+def search_where(names: Sequence[str], replay: bool = False) -> str:
+    """The sources a run searches, in words: "Semantic Scholar and OpenAlex", "saved OpenAlex results"."""
+    named = [SOURCE_NAMES.get(n, n) for n in names if n != "demo"]  # the demo's own papers go unnamed
+    joined = named[0] if len(named) == 1 else ", ".join(named[:-1]) + " and " + named[-1] if named else ""
+    if replay and joined:
+        return f"saved {joined} results"
+    return joined
+
+
+def doing(action: object, graph: Graph, where: str = "") -> str:
+    """An action in plain words, for the status line: what the run is doing at this step."""
+    if isinstance(action, Retrieve):
+        return f"searching {where} for '{action.query}'" if where else f"searching for '{action.query}'"
+    if isinstance(action, AddConfound):
+        return f"considering {action.label} as a confound"
+    if isinstance(action, AddEdge):
+        return f"linking {action.confound} to {graph.target_name(action.target)}"
+    if isinstance(action, AttachPassage):
+        return f"citing a paper for {action.confound} \u2192 {graph.target_name(action.target)}"
+    if isinstance(action, Merge):
+        return f"merging {action.a} and {action.b}"
+    return "wrapping up"
 
 
 def progress(number: int, step: Step) -> str:
@@ -182,6 +220,7 @@ class StatusLine:
         self.clock, self.interval, self.began = clock, interval, clock()
         self.activity, self.step, self.total, self.phi = "starting", 0, 0, 0.0
         self.shown, self.frame = False, 0
+        self.waited = False  # a model call was announced since the last step that was described
         self.lock = threading.Lock()
         self.stopped = threading.Event()
         self.thread: threading.Thread | None = None
@@ -191,12 +230,16 @@ class StatusLine:
         with self.lock:
             if kind == "step":
                 self.step, self.phi = event["n"], event.get("phi", self.phi)
-                self.activity = "choosing the next action"
+                fresh = self.activity == "starting" or self.waited  # say what follows a pause at once
+                if event.get("doing") and (fresh or self.step % STATUS_EVERY == 1):
+                    self.activity = event["doing"]  # else the last description stays: no flicker
+                    self.waited = False
             elif kind == "asking_model":
-                self.activity = "asking the model"
+                self.activity = event.get("purpose") or "asking the model"
+                self.waited = True
             elif text:
                 self.activity = text
-            if self.live:
+            if self.live and not self.stopped.is_set():  # once stopped, the line stays wiped
                 self._draw()
             elif text and (kind == "source_failed" or event.get("status", 200) != 200):
                 self.stream.write(f"  {text}\n")
@@ -263,7 +306,7 @@ class Announced:
                 f"the language model has cost about ${self.dollars:.2f}, the budget of ${self.budget:.2f}"
             )
         if self.log:
-            self.log("asking_model", model=self.model)
+            self.log("asking_model", model=self.model, purpose=current_purpose())
         return self.client.chat(messages)
 
 
@@ -309,6 +352,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="deterministic: skip the second round of searches on the measures of each variable and the "
         "mechanisms of each confound (it needs the synthesis)",
+    )
+    llm.add_argument(
+        "--walkthrough",
+        nargs="?",
+        const="",
+        metavar="CONFOUND",
+        help="the result page opens with a short guided tour; its last step points at CONFOUND's arrow to "
+        "the outcome (default: the first confound that has one)",
     )
     llm.add_argument(
         "--pace",
@@ -809,6 +860,7 @@ def demo(args: argparse.Namespace) -> int:
     for flag, value in (("--base-url", args.base_url), ("--api-key", args.api_key)):
         argv += [flag, value] if value else []
     argv += ["--openrouter"] if args.openrouter else []
+    argv += ["--walkthrough", DEMO_EXAMPLE if not args.live else ""]  # the demo's page opens with a tour
     argv += [] if args.no_open else ["--review"]
     return main(argv)
 
@@ -1071,6 +1123,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.status.wipe()  # a status line already showing would otherwise run into the quotation
         print(set_off(EPIGRAPH), file=sys.stderr)
 
+        where = search_where(corpus_names(args), bool(getattr(args, "replay", False)))
+
         def show(step: Step) -> None:
             steps.append(step)
             graph = step.next_state.graph
@@ -1078,6 +1132,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "step",
                 n=len(steps),
                 action=describe(step.action),
+                doing=doing(step.action, graph, where),
                 reward=round(step.reward, 4),
                 phi=round(phi(graph), 4),
                 connected=len(graph.connected()),
@@ -1135,6 +1190,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     runlog.close()
     wait_for_writes()  # the searches this run made are on disk before it says it is done
     share = to_share_data(trajectory.final, highlights)
+    if args.walkthrough is not None:
+        share["walkthrough"] = {"example": args.walkthrough}
     args.out.write_text(standalone_html(share), encoding="utf-8")
     if args.json:
         result = run_result(trajectory, args.out, audit_path)
@@ -1145,7 +1202,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(result, indent=2))
     else:
         graph = trajectory.final.graph
-        print(f"{findings_text(graph)}\n")
+        print(f"\n\n{findings_text(graph)}\n")  # two blank lines: the findings stand apart from the run
         print(
             f"{len(trajectory.steps)} steps, {len(graph.connected())} connected, phi={trajectory.score:.3f}"
         )

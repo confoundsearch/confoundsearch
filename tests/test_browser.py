@@ -70,3 +70,37 @@ def test_choosing_an_edge_a_confound_or_nothing_keeps_the_diagram_cards_and_evid
     assert seen["lateEvidence"] == seen["lateName"] == "Golf" and seen["lateEdges"] == 0
     assert seen["nodesStillThere"] == 5  # choosing never hides a node
     assert seen["clearedSelection"] == 0 and seen["clearedPanel"].startswith("Click an arrow")
+
+
+@pytest.mark.skipif(node_modules() is None, reason="needs node with playwright")
+def test_the_walkthrough_steps_through_the_page_and_ends_on_the_arrow_it_points_to(tmp_path):
+    from confoundsearch.interface.known import known_to_share_data
+    from confoundsearch.interface.ui.page import standalone_page
+
+    data = known_to_share_data(SEVEN)
+    data["walkthrough"] = {"example": "Bravo"}
+    page = tmp_path / "tour.html"
+    page.write_text(standalone_page(data), encoding="utf-8")
+    done = subprocess.run(
+        ["node", str(ROOT / "tests" / "browser" / "tour.js"), str(page)],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "NODE_PATH": node_modules() or ""},
+        timeout=120,
+    )
+    assert done.returncode == 0, done.stderr
+    seen = json.loads(done.stdout)
+    assert seen["errors"] == [] and seen["visibleAtStart"] and seen["dots"] == 5
+    assert seen["step1"] == {"dot": 0, "focus": [], "blurred": True, "back": True}  # everything blurred
+    assert seen["step2"] == {"dot": 1, "focus": ["question"], "blurred": True}
+    assert seen["step3"] == {"dot": 2, "focus": ["confounds"]} and seen["backToStep2"] == 1
+    last = seen["step5"]
+    assert last["dot"] == 4 and last["focus"] == ["graph"] and last["next"] == "Done"
+    assert last["chosen"] == ["Bravo|to_dv"] and last["pulsing"] == 0  # highlighted, not animated
+    assert "Bravo" in last["text"] and "Firm performance" in last["text"]
+    assert seen["step4links"] == [["Pearl, 2020", "_blank"], ["Morgan and Winship, 2014", "_blank"]]
+    assert seen["closedByEscape"] and seen["reopenedAtStep1"]
+    assert seen["endedByClickingTheArrow"] and seen["evidenceAfterClick"].startswith("Bravo")
+    assert (
+        seen["hover"]["before"] != seen["hover"]["after"]
+    )  # darker under the pointer, a little off the line

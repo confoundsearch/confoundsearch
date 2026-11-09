@@ -16,7 +16,9 @@ import json
 import os
 import re
 from collections.abc import Sequence
-from typing import Any, Mapping, Protocol
+from contextlib import contextmanager
+from contextvars import ContextVar
+from typing import Any, Iterator, Mapping, Protocol
 
 from confoundsearch.errors import LLMError, RemoteError
 from confoundsearch.http import Transport, urllib_transport
@@ -42,6 +44,25 @@ def temperature_for(model: str | None) -> float | None:
     """
     name = (model or "").rsplit("/", 1)[-1].lower()
     return None if name.startswith(("gpt-5", "gpt-6")) else 0.0
+
+
+_PURPOSE: ContextVar[str] = ContextVar("purpose", default="")
+
+
+@contextmanager
+def purpose(text: str) -> Iterator[None]:
+    """Say what the model calls made inside are for, e.g. "asking the model for other names of 'X'", so a
+    status line can show it. It changes nothing about the calls themselves."""
+    token = _PURPOSE.set(text)
+    try:
+        yield
+    finally:
+        _PURPOSE.reset(token)
+
+
+def current_purpose() -> str:
+    """What the model call being made now is for, or "" if nothing said."""
+    return _PURPOSE.get()
 
 
 class ChatClient(Protocol):
@@ -133,7 +154,8 @@ class LLMJudge:
             f"Passage:\n{passage.text}\n\n"
             "Does the passage state or directly support this claim? Answer yes or no."
         )
-        answer = self.client.chat([{"role": "user", "content": prompt}])
+        with purpose(f"asking the model whether a paper supports {source.label} \u2192 {target}"):
+            answer = self.client.chat([{"role": "user", "content": prompt}])
         return answer.strip().casefold().startswith("yes")
 
 
@@ -157,9 +179,10 @@ class LLMSynthesis:
         """(confound, "X" or "Y", passage id) for each passage that supports a link, best first."""
         found: list[tuple[str, Target, str]] = []
         for start in range(0, len(passages), self.batch):
-            for line in self.client.chat(
-                self._messages(x, y, confounds, passages[start : start + self.batch])
-            ).splitlines():
+            batch = passages[start : start + self.batch]
+            with purpose(f"asking the model which of {len(batch)} papers support each link"):
+                reply = self.client.chat(self._messages(x, y, confounds, batch))
+            for line in reply.splitlines():
                 support = self._support(line, confounds, passages)
                 if support is not None and support not in found:
                     found.append(support)
@@ -227,7 +250,8 @@ class LLMHighlights:
         ]
         for passage in passages:
             lines += [f"id: {passage.id}", f"text: {passage.text}", ""]
-        reply = self.client.chat([{"role": "user", "content": "\n".join(lines)}])
+        with purpose(f"asking the model for the sentence that best shows {confound} affects {target}"):
+            reply = self.client.chat([{"role": "user", "content": "\n".join(lines)}])
         texts = {passage.id: passage.text for passage in passages}
         found: dict[str, str] = {}
         for line in reply.splitlines():
@@ -277,7 +301,8 @@ class LLMRewordings:
             "own vocabulary: swap the abstract label for the specific mechanism, measure or setting a paper "
             'would name. Reply with JSON only: {"queries": ["..."]}'
         )
-        return _strings(self.client.chat([{"role": "user", "content": prompt}]), "queries")
+        with purpose(f"asking the model for other ways to search for '{query}'"):
+            return _strings(self.client.chat([{"role": "user", "content": prompt}]), "queries")
 
 
 class LLMConfounds:
@@ -294,7 +319,8 @@ class LLMConfounds:
             "influence both. Each is a short noun phrase of 1 to 4 words, as papers name it. "
             'Reply with JSON only: {"confounds": ["..."]}'
         )
-        return _strings(self.client.chat([{"role": "user", "content": prompt}]), "confounds")
+        with purpose(f"asking the model which confounds of {x} and {y} to look for"):
+            return _strings(self.client.chat([{"role": "user", "content": prompt}]), "confounds")
 
 
 class LLMSynonyms:
@@ -310,7 +336,8 @@ class LLMSynonyms:
             "research, the way papers write them (1 to 4 words each). "
             'Reply with JSON only: {"synonyms": ["..."]}'
         )
-        return _strings(self.client.chat([{"role": "user", "content": prompt}]), "synonyms")
+        with purpose(f"asking the model for other names of '{term}'"):
+            return _strings(self.client.chat([{"role": "user", "content": prompt}]), "synonyms")
 
 
 class LLMProposer:
@@ -336,7 +363,8 @@ class LLMProposer:
             '{"queries": ["..."], "confounds": [{"label": "...", "strings": ["..."]}], '
             '"merges": [{"a": "...", "b": "...", "label": "..."}]}'
         )
-        reply = self.client.chat([{"role": "user", "content": prompt}])
+        with purpose("asking the model for the next moves"):
+            reply = self.client.chat([{"role": "user", "content": prompt}])
         try:
             data = json.loads(_FENCE.sub("", reply.strip()))
             queries, confounds = list(data.get("queries", [])), list(data.get("confounds", []))

@@ -18,6 +18,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from confoundsearch.interface.ui.layout import pill_position
+
 MAX_DRAWN = 5  # confounds drawn in the diagram; every confound still has its card
 COLORS = (
     "#e66fc3",
@@ -217,20 +219,27 @@ def node_positions(count: int) -> list[tuple[float, float]]:
     ]
 
 
+EDGE_HIT_WIDTH = 18  # pixels either side of an arrow's line that still count as pointing at it, in all
+
+
 def edge_svg(name: str, color: str, leg: str, frm: tuple[float, float], variable: str, count: int) -> str:
     """One arrow from a confound's node to a variable. Its paper count is a pill, shown only when the arrow is chosen."""
     target = VARIABLES[variable]
     ux, uy = unit(frm, target)
     x1, y1 = frm[0] + NODE_R * ux, frm[1] + NODE_R * uy
     x2, y2 = target[0] - VARIABLE_R * ux, target[1] - VARIABLE_R * uy
-    mx, my = (x1 + x2) / 2, (y1 + y2) / 2
+    middle_x = (VARIABLES["x"][0] + VARIABLES["y"][0]) / 2
+    mx, my = pill_position(frm, (x1, y1), (x2, y2), middle_x, NODE_R)
     dash = "" if count else ' stroke-dasharray="6 5"'
     label = html.escape(name)
     where = f'data-md="{label}" data-leg="{leg}"'
+    click = f"onclick=\"event.stopPropagation();dagLegClick('{js_arg(name)}','{leg}')\""
+    ends = f'x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}"'
     return (
-        f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" stroke="#888" stroke-width="3" opacity="0.4"{dash} '
-        f'marker-end="url(#arrowhead-arc)" style="cursor:pointer" {where} data-color="{color}" '
-        f"onclick=\"event.stopPropagation();dagLegClick('{js_arg(name)}','{leg}')\" />\n"
+        f'<g class="edge" {click}>'  # a wide, invisible line takes the pointer, so the arrow is easy to hit
+        f'<line class="edge-hit" {ends} stroke="transparent" stroke-width="{EDGE_HIT_WIDTH}" />'
+        f'<line {ends} stroke="#888" stroke-width="3" opacity="0.4"{dash} '
+        f'marker-end="url(#arrowhead-arc)" {where} data-color="{color}" /></g>\n'
         f'<g class="dag-count pill" {where} transform="translate({mx:.1f},{my:.1f})"><rect x="-38" y="-13" width="76" height="26" rx="13" fill="{color}" />'
         f'<text y="5" text-anchor="middle" font-size="13" font-weight="700" fill="#fff" font-family="IBM Plex Sans, Arial">{papers(count)}</text></g>'
     )
@@ -294,6 +303,69 @@ def diagram(data: dict[str, Any], drawn: list[tuple[str, str]], counts: dict[str
     return "\n".join(parts)
 
 
+PEARL_URL = "https://en.wikipedia.org/wiki/Causality_(book)"  # covers both editions
+MORGAN_WINSHIP_URL = "https://www.cambridge.org/core/books/counterfactuals-and-causal-inference/5CC81E6DF63C5E5A8B88F79D45E1D1B7"
+
+
+def cite(url: str, text: str) -> str:
+    """A reference in the tour's text, linked, opening in a new tab."""
+    return f'<a href="{html.escape(url)}" target="_blank" rel="noopener">{html.escape(text)}</a>'
+
+
+def tour_steps(
+    data: dict[str, Any], confounds: list[dict[str, Any]], example: str = ""
+) -> list[dict[str, Any]]:
+    """The walkthrough, built from this result: what each step says, the part of the page it shows, and on
+    the last step the arrow it points to (`example` affecting the outcome, or the first confound that has one)."""
+    iv, dv, n = html.escape(data["iv"]), html.escape(data["dv"]), len(confounds)
+    with_y = [c["name"] for c in confounds[:MAX_DRAWN] if yes(c["evidence_to_dv"])]
+    shown = example if example in with_y else (with_y[0] if with_y else "")
+    found = "1 possible confound, which is" if n == 1 else f"{n} possible confounds, which are"
+    these = (
+        "This construct is a possible confound" if n == 1 else f"These {n} constructs are possible confounds"
+    )
+    last = (
+        f"{these} because there is evidence that each may influence the independent variable, <b>{iv}</b>, and "
+        f"the dependent variable, <b>{dv}</b>. To see the evidence, click an arrow."
+    )
+    if shown:
+        last += (
+            f" For example, to see the evidence that <b>{html.escape(shown)}</b> affects <b>{dv}</b>, click the "
+            "highlighted arrow."
+        )
+    return [
+        {
+            "html": "<b>ConfoundSearch</b> reviews existing scientific literature to find known confounds. "
+            "This interface shows its output.",
+            "focus": None,
+        },
+        {
+            "html": "In this example, we are reviewing constructs that may confound the relationship between "
+            f"<b>{iv}</b> and <b>{dv}</b>.",
+            "focus": "question",
+        },
+        {"html": f"ConfoundSearch has found <b>{found}</b> listed on the left.", "focus": "confounds"},
+        {
+            "html": "The tool shows possible confounds on a causal graph "
+            f"({cite(PEARL_URL, 'Pearl, 2020')}). The interface itself is a causal graph. It is an interactive "
+            "version of the diagrams found in many causal inference textbooks "
+            f"(e.g., {cite(MORGAN_WINSHIP_URL, 'Morgan and Winship, 2014')}).",
+            "focus": "graph",
+        },
+        {"html": last, "focus": "graph", "edge": [shown, "to_dv"] if shown else None},
+    ]
+
+
+def tour_card(steps: int) -> str:
+    dots = "".join(f'<button class="tour-dot" aria-label="Step {i + 1}"></button>' for i in range(steps))
+    return (
+        '<div id="tour-card" class="tour-card" role="dialog" aria-label="A short tour of this page" hidden>'
+        '<button class="tour-close" aria-label="Close the tour">\u00d7</button><p class="tour-text"></p>'
+        '<div class="tour-nav"><button class="tour-prev" aria-label="Back">\u2039</button>'
+        f'<div class="tour-dots">{dots}</div><button class="tour-next" aria-label="Next">\u203a</button></div></div>'
+    )
+
+
 def standalone_page(data: dict[str, Any]) -> str:
     """The whole page for a `share_data` dict, as one HTML string with its data, style and script inside."""
     by_name = {c["name"]: c for c in data.get("dag_confounders", [])}
@@ -302,21 +374,30 @@ def standalone_page(data: dict[str, Any]) -> str:
     drawn = [(c["name"], COLORS[i % len(COLORS)]) for i, c in enumerate(confounds[:MAX_DRAWN])]
     counts = {c["name"]: (len(yes(c["evidence_to_iv"])), len(yes(c["evidence_to_dv"]))) for c in confounds}
     iv, dv = html.escape(data["iv"]), html.escape(data["dv"])
+    tour = data.get("walkthrough")
+    steps = tour_steps(data, confounds, str(tour.get("example") or "")) if isinstance(tour, dict) else []
+    tour_style = asset("tour.css") if steps else ""
+    tour_button = '<button id="tour-open" class="tour-open">Take the tour</button>' if steps else ""
+    tour_parts = (
+        f"{tour_card(len(steps))}\n<script>\nvar TOUR_STEPS = {json.dumps(steps)};\n{asset('tour.js')}</script>\n"
+        if steps
+        else ""
+    )
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>ConfoundSearch \u2014 {iv} \u2192 {dv}</title>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-{asset("page.css")}</style>
+{asset("page.css")}{tour_style}</style>
 </head><body>
-<header class="app-nav"><div class="brand">Confound<em>Search</em></div></header>
-<div class="status-header"><h1>Showing possible confounds for the relationship between <b>{iv}</b> and <b>{dv}</b></h1></div>
+<header class="app-nav"><div class="brand">Confound<em>Search</em></div>{tour_button}</header>
+<div class="status-header" data-tour="question"><h1>Showing possible confounds for the relationship between <b>{iv}</b> and <b>{dv}</b></h1></div>
 <div class="row">
-  <div class="col" style="flex:0.62;">{cards(data, confounds)}</div>
-  <div class="col" style="flex:1.45;"><div class="dag-container">{diagram(data, drawn, counts)}</div></div>
-  <div class="col" style="flex:1.45;"><div class="evidence-box" id="evidence-display">{blob["__deselect__"]}</div></div>
+  <div class="col" style="flex:0.62;" data-tour="confounds">{cards(data, confounds)}</div>
+  <div class="col" style="flex:1.45;" data-tour="graph"><div class="dag-container">{diagram(data, drawn, counts)}</div></div>
+  <div class="col" style="flex:1.45;" data-tour="evidence"><div class="evidence-box" id="evidence-display">{blob["__deselect__"]}</div></div>
 </div>
 <script>
 var EVIDENCE_BLOB = {json.dumps(blob)};
 {asset("page.js")}</script>
-</body></html>
+{tour_parts}</body></html>
 """

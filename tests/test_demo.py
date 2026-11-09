@@ -591,6 +591,12 @@ class TestTheDemoCommand:
         monkeypatch.delenv("OPENAI_API_KEY")
         assert "--pace" in self.argv_for(monkeypatch, "--live")  # but replaying the live recording is paced
 
+    def test_the_demo_page_opens_with_the_tour_pointing_at_market_competition(self, monkeypatch):
+        argv = self.argv_for(monkeypatch)
+        assert argv[argv.index("--walkthrough") + 1] == "market competition" == cli.DEMO_EXAMPLE
+        live = self.argv_for(monkeypatch, "--live")  # other confounds: the page picks the first it can
+        assert live[live.index("--walkthrough") + 1] == ""
+
     def test_no_pause_is_asked_for_when_the_pace_is_zero(self, monkeypatch):
         monkeypatch.setattr(cli, "DEMO_PACE", 0.0)
         assert "--pace" not in self.argv_for(monkeypatch)

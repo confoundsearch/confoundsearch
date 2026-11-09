@@ -1,0 +1,28 @@
+/* the walkthrough: everything blurred but the part being explained, and a card at the bottom */
+[data-tour]{transition:filter .25s ease,opacity .25s ease;}
+.tour-on [data-tour]{filter:blur(3px);opacity:.5;pointer-events:none;}
+.tour-on [data-tour].tour-focus{filter:none;opacity:1;pointer-events:auto;border-radius:6px;
+  outline:3px solid var(--accent);outline-offset:6px;}
+.tour-card{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:50;width:min(560px,calc(100vw - 32px));
+  box-sizing:border-box;background:var(--panel);color:var(--ink);border:1px solid var(--rule);border-radius:10px;
+  box-shadow:0 12px 32px oklch(0.3 0.03 255/.22);padding:22px 26px 14px;font-size:15px;line-height:1.55;}
+.tour-card[hidden]{display:none;}
+.tour-text{margin:0 18px 14px 0;}
+.tour-text b{font-weight:600;}
+.tour-text a{color:var(--accent);text-decoration:none;border-bottom:1px solid currentColor;}
+.tour-text a:hover{border-bottom-width:2px;}
+.tour-close{position:absolute;top:8px;right:10px;border:0;background:transparent;font-size:20px;line-height:1;
+  color:var(--ink-faint);cursor:pointer;padding:4px 6px;}
+.tour-close:hover{color:var(--ink);}
+.tour-nav{display:flex;align-items:center;justify-content:space-between;gap:12px;}
+.tour-prev,.tour-next{min-width:36px;height:32px;border:1px solid var(--rule);border-radius:16px;background:var(--panel);
+  font:inherit;font-size:18px;line-height:1;color:var(--accent);cursor:pointer;padding:0 12px;}
+.tour-next{font-size:15px;font-weight:600;}
+.tour-prev:disabled{opacity:.3;cursor:default;}
+.tour-prev:not(:disabled):hover,.tour-next:hover{background:var(--rule-soft);}
+.tour-dots{display:flex;gap:8px;}
+.tour-dot{width:9px;height:9px;border-radius:50%;border:0;padding:0;background:var(--rule);cursor:pointer;}
+.tour-dot.on{background:var(--accent);}
+.tour-open{font:inherit;font-size:12.5px;color:var(--accent);background:transparent;border:1px solid var(--rule);
+  border-radius:14px;padding:3px 12px;cursor:pointer;}
+.tour-open:hover{background:var(--rule-soft);}

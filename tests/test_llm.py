@@ -10,6 +10,7 @@ import pytest
 from confoundsearch import (
     AddConfound,
     LLMError,
+    LLMHighlights,
     LLMJudge,
     LLMProposer,
     LLMSynthesis,
@@ -403,3 +404,47 @@ class TestSynthesis:
 )
 def test_the_newer_gpt_models_get_no_temperature(model, expected):
     assert temperature_for(model) == expected
+
+
+def test_each_kind_of_model_call_says_what_it_is_for():
+    from confoundsearch.model.expansion import LLMAttributes, LLMMeasures, LLMMechanisms
+    from confoundsearch.model.llm import LLMConfounds, LLMRewordings, LLMSynonyms, current_purpose
+
+    class Seeing:
+        def __init__(self, reply):
+            self.reply, self.purposes = reply, []
+
+        def chat(self, messages):
+            self.purposes.append(current_purpose())
+            return self.reply
+
+    terms = Seeing('{"terms": [], "confounds": [], "synonyms": [], "queries": []}')
+    LLMConfounds(terms)("X", "Y")
+    LLMSynonyms(terms)("Firm performance")
+    LLMRewordings(terms)("a query")
+    LLMMeasures(terms)("Firm performance")
+    LLMMechanisms(terms)("CEO style", "Firm performance")
+    LLMMechanisms(terms)("CEO style")
+    LLMAttributes(terms)("CEO style")
+    assert terms.purposes == [
+        "asking the model which confounds of X and Y to look for",
+        "asking the model for other names of 'Firm performance'",
+        "asking the model for other ways to search for 'a query'",
+        "asking the model how papers measure 'Firm performance'",
+        "asking the model how CEO style could affect Firm performance",
+        "asking the model how CEO style works",
+        "asking the model which traits of 'CEO style' papers measure",
+    ]
+    judge = Seeing("yes")
+    LLMJudge(judge).supports(Passage("p", "text"), Vertex("size", frozenset({"size"})), "Y")
+    synthesis = Seeing("")
+    LLMSynthesis(synthesis)("X", "Y", ["size"], [Passage("p", "text")])
+    highlight = Seeing("")
+    LLMHighlights(highlight)("size", "Y", [Passage("p", "text")])
+    proposer = Seeing("{}")
+    LLMProposer(proposer).propose(State.initial("X", "Y"))
+    assert judge.purposes == ["asking the model whether a paper supports size \u2192 Y"]
+    assert synthesis.purposes == ["asking the model which of 1 papers support each link"]
+    assert highlight.purposes == ["asking the model for the sentence that best shows size affects Y"]
+    assert proposer.purposes == ["asking the model for the next moves"]
+    assert current_purpose() == ""  # and nothing is left set afterwards

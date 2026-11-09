@@ -717,6 +717,71 @@ def test_a_status_line_already_showing_is_wiped_before_what_comes_next():
     assert stream.written[-1] == "\r\x1b[K"
 
 
+def test_once_stopped_the_status_line_is_not_drawn_again():
+    class Terminal:
+        def __init__(self):
+            self.written = []
+
+        def isatty(self):
+            return True
+
+        def write(self, text):
+            self.written.append(text)
+
+        def flush(self):
+            pass
+
+    stream = Terminal()
+    status = cli.StatusLine(stream)
+    status({"event": "run_started"})
+    status.stop()
+    drawn = len(stream.written)
+    status({"event": "run_finished"})  # the log goes on after the run; the line must not come back
+    assert len(stream.written) == drawn and stream.written[-1] == "\r\x1b[K"
+
+
+def test_each_kind_of_step_is_said_in_plain_words():
+    from confoundsearch import AddConfound, AddEdge, AttachPassage, Graph, Merge, Retrieve, Stop
+
+    graph = Graph("Org structure", "Performance")
+    assert cli.doing(Retrieve("ceo style structure"), graph) == "searching for 'ceo style structure'"
+    assert cli.doing(AddConfound("CEO style", frozenset()), graph) == "considering CEO style as a confound"
+    assert cli.doing(AddEdge("CEO style", "Y"), graph) == "linking CEO style to Performance"
+    assert (
+        cli.doing(AttachPassage("CEO style", "X", "p1"), graph)
+        == "citing a paper for CEO style \u2192 Org structure"
+    )
+    assert cli.doing(Merge("a", "b"), graph) == "merging a and b"
+    assert cli.doing(Stop(), graph) == "wrapping up"
+
+
+@pytest.mark.parametrize(
+    "names, replay, expected",
+    [
+        (["semanticscholar"], False, "Semantic Scholar"),
+        (["semanticscholar", "openalex"], False, "Semantic Scholar and OpenAlex"),
+        (
+            ["elasticsearch", "semanticscholar", "openalex"],
+            False,
+            "the hosted index, Semantic Scholar and OpenAlex",
+        ),
+        (["semanticscholar", "openalex"], True, "saved Semantic Scholar and OpenAlex results"),
+        (["demo"], True, ""),  # the demo's own papers go unnamed: "searching for '...'"
+        ([], False, ""),
+    ],
+)
+def test_searches_name_their_sources(names, replay, expected):
+    assert cli.search_where(names, replay) == expected
+
+
+def test_a_search_says_where_it_looks():
+    from confoundsearch import Graph, Retrieve
+
+    graph = Graph("X", "Y")
+    assert cli.doing(Retrieve("q"), graph, "OpenAlex") == "searching OpenAlex for 'q'"
+    assert cli.doing(Retrieve("q"), graph) == "searching for 'q'"
+
+
 class TestSetup:
     def answers(self, monkeypatch, choice, *keys, folder=""):
         replies = iter([choice, folder])  # the model, then the data directory
@@ -972,6 +1037,15 @@ class TestTheBestSentenceAndThePace:
         assert "<mark" not in "".join(page_evidence(tmp_path / "r.html").values())
         log = [json.loads(line)["event"] for line in (tmp_path / "r.log.jsonl").read_text().splitlines()]
         assert "highlights_skipped" in log
+
+    def test_walkthrough_puts_the_tour_on_the_page_and_without_it_there_is_none(
+        self, tmp_path, monkeypatch, env
+    ):
+        self.run_default(tmp_path, monkeypatch, env, "--confounds", "1", "--walkthrough", "firm size")
+        page = (tmp_path / "r.html").read_text()
+        assert "var TOUR_STEPS" in page and '"edge": ["firm size", "to_dv"]' in page
+        self.run_default(tmp_path, monkeypatch, env, "--confounds", "1")
+        assert "var TOUR_STEPS" not in (tmp_path / "r.html").read_text()
 
     def test_pace_waits_after_each_step(self, tmp_path, monkeypatch, env):
         waits = []

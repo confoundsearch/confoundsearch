@@ -29,7 +29,7 @@ initiative: it spends the user's money.
    - papers: by default the hosted index, which needs `ES_URL` and `ES_API_KEY`. Alternatives are
      `--corpus semanticscholar` (a free key in `S2_KEY` lifts the rate limit), `--corpus openalex`, or
      `--corpus-file passages.jsonl`. To try the tool quickly, `confoundsearch demo` runs a curated example (organizational structure and firm
-     performance) on a small set of papers shipped with the package, with saved model answers: it takes about a second,
+     performance) on a small set of papers shipped with the package, with saved model answers: it takes about a minute,
      costs nothing and needs no keys. `--live` runs the same question on the real sources. With no `--corpus`, every source that is set up is searched and merged.
    Variables can live in a `.env` file in the working directory.
 3. If something is missing, tell the user exactly which variable to set in `.env` and stop.

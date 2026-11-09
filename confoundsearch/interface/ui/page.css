@@ -65,6 +65,10 @@ h1{font-size:1.3em;}
 /* the diagram: with an edge chosen, that edge is strong and everything else fades */
 .dag-svg text{user-select:none;-webkit-user-select:none;pointer-events:none;}
 .dag-md-circle{cursor:pointer;transition:opacity .15s;}
+.dag-svg .edge{cursor:pointer;}
+.dag-svg .edge-hit{pointer-events:stroke;}
+.dag-svg .edge:hover line[data-md]:not(.sel){stroke:#3a3a3a;opacity:.85;}
+.dag-svg .edge:hover line[data-md].sel{filter:brightness(.78);}
 .dag-count.pill{display:none;} /* a count shows only on a chosen arrow */
 .dag-count{pointer-events:none;}
 .dag-ring{opacity:0;}

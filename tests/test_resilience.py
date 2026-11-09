@@ -491,24 +491,49 @@ class TestStatusLine:
 
     def test_on_a_terminal_one_line_is_rewritten_with_the_activity_step_and_score(self):
         out, clock = Tty(), Clock()
+        cli.StatusLine(out, clock=clock).stop()  # nothing shown yet: nothing written
+        assert out.getvalue() == ""
         status = cli.StatusLine(out, clock=clock)
         status.total = 20
-        status.stop()  # nothing shown yet: nothing written
-        assert out.getvalue() == ""
         clock.now = 75
         status(self.asked("request", url="https://api.openalex.org/works?search=x", attempt=1))
         status(self.asked("step", n=3, phi=1.25))
         status(self.asked("asking_model"))
         drawn = out.getvalue().split("\r\x1b[K")[1:]
         assert "searching openalex.org for 'x'" in drawn[0] and "1:15" in drawn[0] and "step 0/20" in drawn[0]
-        assert (
-            "choosing the next action" in drawn[1] and "step 3/20" in drawn[1] and "\u03a6 1.25" in drawn[1]
+        assert (  # a step that says nothing of itself keeps the last activity
+            "searching openalex.org for 'x'" in drawn[1]
+            and "step 3/20" in drawn[1]
+            and "\u03a6 1.25" in drawn[1]
         )
         assert "asking the model" in drawn[2]
         assert "\n" not in out.getvalue()
         status.stop()
         assert out.getvalue().endswith("\r\x1b[K")
         status.stop()  # clearing twice is harmless
+
+    def test_it_says_what_the_run_is_doing_at_every_tenth_step_and_after_a_pause(self):
+        out = Tty()
+        status = cli.StatusLine(out)
+        shown = []
+
+        def step(n, what):
+            status(self.asked("step", n=n, phi=0.0, doing=what))
+            shown.append(status.activity)
+
+        step(1, "searching for 'a'")  # the first step after starting: said at once
+        step(2, "searching for 'b'")  # not the tenth: the last description stays
+        step(11, "linking c to Y")  # the next tenth
+        status(self.asked("asking_model"))
+        shown.append(status.activity)
+        step(12, "citing a paper for c \u2192 Y")  # just after asking the model: said at once
+        assert shown == [
+            "searching for 'a'",
+            "searching for 'a'",
+            "linking c to Y",
+            "asking the model",
+            "citing a paper for c \u2192 Y",
+        ]
 
     def test_a_long_line_is_cut_to_the_terminal_width(self, monkeypatch):
         monkeypatch.setattr(cli.shutil, "get_terminal_size", lambda fallback: os.terminal_size((30, 5)))
@@ -566,8 +591,25 @@ class TestStatusLine:
         seen = []
         client = cli.Announced(ScriptedClient(), lambda kind, **d: seen.append((kind, d)))
         assert client.chat([{"role": "user", "content": "hi"}]) == "yes" and client.model == "scripted"
-        assert seen == [("asking_model", {"model": "scripted"})]
+        assert seen == [("asking_model", {"model": "scripted", "purpose": ""})]  # no purpose said: none sent
+        from confoundsearch.model.llm import purpose
+
+        with purpose("asking the model for other names of 'X'"):
+            client.chat([{"role": "user", "content": "hi"}])
+        assert seen[-1] == (
+            "asking_model",
+            {"model": "scripted", "purpose": "asking the model for other names of 'X'"},
+        )
         assert cli.Announced(ScriptedClient(), None).chat([{"role": "user", "content": "hi"}]) == "yes"
+
+    def test_the_status_line_shows_what_the_model_is_asked_and_after_it_what_the_run_does(self):
+        status = cli.StatusLine(Tty())
+        status(self.asked("asking_model", purpose="asking the model for other names of 'X'"))
+        assert status.activity == "asking the model for other names of 'X'"
+        status(self.asked("asking_model"))
+        assert status.activity == "asking the model"  # nothing said: the plain words
+        status(self.asked("step", n=5, phi=0.0, doing="searching OpenAlex for 'q'"))
+        assert status.activity == "searching OpenAlex for 'q'"  # just after a call: said at once
 
     def test_a_run_on_a_terminal_prints_no_line_per_step(self, tmp_path, monkeypatch, capsys, env):
         monkeypatch.setattr(cli, "build_backend", fake_backend(env))

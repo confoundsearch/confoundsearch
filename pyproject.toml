@@ -45,7 +45,7 @@ include = ["confoundsearch*"]
 "confoundsearch" = ["py.typed"]
 "confoundsearch.data" = ["demo.sqlite3"]
 "confoundsearch.interface.skill" = ["SKILL.md", "UI_SKILL.md"]
-"confoundsearch.interface.ui" = ["app.html", "page.css", "page.js"]
+"confoundsearch.interface.ui" = ["app.html", "page.css", "page.js", "tour.css", "tour.js"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

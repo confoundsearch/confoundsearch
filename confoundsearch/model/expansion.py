@@ -18,7 +18,7 @@ from typing import Any
 
 from confoundsearch.errors import LLMError
 from confoundsearch.logic.graph import normalize
-from confoundsearch.model.llm import _FENCE, ChatClient, _strings
+from confoundsearch.model.llm import _FENCE, ChatClient, _strings, purpose
 
 ANGLES = (
     ("synonyms", "synonyms and other names for the same idea, including abbreviations and British spellings"),
@@ -86,9 +86,9 @@ class LLMMeasures:
             f"List {self.count}, 1 to 4 words each. "
             'Reply with JSON only: {"terms": ["..."]}'
         )
-        return clean(
-            _strings(self.client.chat([{"role": "user", "content": prompt}]), "terms"), {normalize(term)}
-        )
+        with purpose(f"asking the model how papers measure '{term}'"):
+            reply = self.client.chat([{"role": "user", "content": prompt}])
+        return clean(_strings(reply, "terms"), {normalize(term)})
 
 
 class LLMMechanisms:
@@ -103,14 +103,15 @@ class LLMMechanisms:
 
     def __call__(self, construct: str, target: str | None = None) -> list[str]:
         on = f' affect "{target}"' if target else " work"
+        what = f"how {construct} could affect {target}" if target else f"how {construct} works"
         prompt = (
             f'Through what specific channels or mechanisms could "{construct}"{on}? '
             f"Name {self.count} concrete mechanisms, 1 to 4 words each, as empirical papers would name them. "
             'Reply with JSON only: {"terms": ["..."]}'
         )
-        return clean(
-            _strings(self.client.chat([{"role": "user", "content": prompt}]), "terms"), {normalize(construct)}
-        )
+        with purpose(f"asking the model {what}"):
+            reply = self.client.chat([{"role": "user", "content": prompt}])
+        return clean(_strings(reply, "terms"), {normalize(construct)})
 
 
 class LLMAttributes:
@@ -129,9 +130,9 @@ class LLMAttributes:
             f"are used as explanatory variables? List {self.count}, 1 to 4 words each. "
             'Reply with JSON only: {"terms": ["..."]}'
         )
-        return clean(
-            _strings(self.client.chat([{"role": "user", "content": prompt}]), "terms"), {normalize(construct)}
-        )
+        with purpose(f"asking the model which traits of '{construct}' papers measure"):
+            reply = self.client.chat([{"role": "user", "content": prompt}])
+        return clean(_strings(reply, "terms"), {normalize(construct)})
 
 
 FIELDS = (

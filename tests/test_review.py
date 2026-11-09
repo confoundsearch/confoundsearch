@@ -196,6 +196,7 @@ class TestRunReview:
         assert self.run(tmp_path, monkeypatch, env, "--review") == 0
         out = capsys.readouterr().out
         assert "Candidate confounds for" in out and out.index("Candidate confounds") < out.index(" steps, ")
+        assert out.startswith("\n\nCandidate confounds for")  # set apart by two blank lines
         assert out.rstrip().endswith("Opening the interface in your browser\u2026")
 
 
