@@ -98,8 +98,11 @@ def test_the_walkthrough_steps_through_the_page_and_ends_on_the_arrow_it_points_
     assert last["dot"] == 4 and last["focus"] == ["graph"] and last["next"] == "Done"
     assert last["chosen"] == ["Bravo|to_dv"] and last["pulsing"] == 0  # highlighted, not animated
     assert "Bravo" in last["text"] and "Firm performance" in last["text"]
-    assert seen["step4links"] == [["Pearl, 2020", "_blank"], ["Morgan and Winship, 2014", "_blank"]]
+    assert seen["step4links"] == [["Pearl, 2020", "_blank"], ["Morgan & Winship, 2014", "_blank"]]
     assert seen["closedByEscape"] and seen["reopenedAtStep1"]
+    assert (
+        seen["scrolledDuringTour"] == 0 and seen["scrolledAfterTour"] > 0
+    )  # held still only while it is open
     assert seen["endedByClickingTheArrow"] and seen["evidenceAfterClick"].startswith("Bravo")
     assert (
         seen["hover"]["before"] != seen["hover"]["after"]

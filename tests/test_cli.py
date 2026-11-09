@@ -1043,7 +1043,9 @@ class TestTheBestSentenceAndThePace:
     ):
         self.run_default(tmp_path, monkeypatch, env, "--confounds", "1", "--walkthrough", "firm size")
         page = (tmp_path / "r.html").read_text()
-        assert "var TOUR_STEPS" in page and '"edge": ["firm size", "to_dv"]' in page
+        assert (
+            "var TOUR_STEPS" in page and '"edge": ["Firm size", "to_dv"]' in page
+        )  # capitalised on the page
         self.run_default(tmp_path, monkeypatch, env, "--confounds", "1")
         assert "var TOUR_STEPS" not in (tmp_path / "r.html").read_text()
 

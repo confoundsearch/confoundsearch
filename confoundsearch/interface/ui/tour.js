@@ -11,6 +11,7 @@
     function show() {
         var step = steps[at];
         document.body.classList.add('tour-on');
+        document.documentElement.classList.add('tour-lock');
         document.querySelectorAll('[data-tour]').forEach(function (el) {
             el.classList.toggle('tour-focus', el.getAttribute('data-tour') === step.focus);
         });
@@ -29,6 +30,7 @@
 
     function end() {
         document.body.classList.remove('tour-on');
+        document.documentElement.classList.remove('tour-lock');
         document.querySelectorAll('.tour-focus').forEach(function (el) { el.classList.remove('tour-focus'); });
         card.hidden = true;
     }
@@ -48,6 +50,10 @@
         if (ev.key === 'ArrowRight') go(1);
         else if (ev.key === 'ArrowLeft') go(-1);
         else if (ev.key === 'Escape') end();
+    });
+    // a touch mouse or trackpad must not scroll the page (and so the graph) under the card while it is open
+    ['wheel', 'touchmove'].forEach(function (kind) {
+        window.addEventListener(kind, function (ev) { if (!card.hidden) ev.preventDefault(); }, { passive: false });
     });
     // clicking an arrow during the tour is what the last step asks for: the tour ends and the evidence shows
     document.addEventListener('click', function (ev) {

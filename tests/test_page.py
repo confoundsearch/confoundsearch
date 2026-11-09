@@ -56,7 +56,7 @@ class TestARun:
 
     def test_page_embeds_the_graph_and_evidence(self, env):
         html = render(env, *FULL)
-        assert "firm size" in html and "dag-svg" in html and "EVIDENCE_BLOB" in html
+        assert "Firm size" in html and "dag-svg" in html and "EVIDENCE_BLOB" in html  # its name, capitalised
         assert "larger firms invest more in IT" in html  # the quote behind the P(C, X) edge
 
     def test_page_is_self_contained_apart_from_fonts(self, env):
@@ -80,7 +80,7 @@ class TestARun:
         assert html.count('class="md-card"') == n
         assert html.count('class="dag-md-circle"') == min(n, 5)
         assert all(
-            f"__meta__:c{i}" in blob(html) for i in range(n)
+            f"__meta__:C{i}" in blob(html) for i in range(n)
         )  # a card past the fifth still has evidence
 
     def test_unconnected_confounds_render_without_error(self, env):
@@ -289,14 +289,18 @@ class TestTheWalkthrough:
         steps = self.steps(html)
         assert [s["focus"] for s in steps] == [None, "question", "confounds", "graph", "graph"]
         assert "<b>X var</b> and <b>Y var</b>" in steps[1]["html"]
-        assert "2 possible confounds, which are" in steps[2]["html"]
+        assert "found <b>2 possible confounds</b>, which are listed on the left" in steps[2]["html"]
         fourth = steps[3]["html"]
-        assert "Judea Pearl" not in fourth and "The interface itself is a causal graph" in fourth
+        assert "The interface itself is an interactive version of the diagrams" in fourth
+        assert "interface itself is a causal graph" not in fourth
         assert '<a href="https://en.wikipedia.org/wiki/Causality_(book)" target="_blank"' in fourth
-        assert ">Pearl, 2020</a>" in fourth and ">Morgan and Winship, 2014</a>" in fourth
+        assert ">Pearl, 2020</a>" in fourth and ">Morgan &amp; Winship, 2014</a>" in fourth
         assert "cambridge.org/core/books/counterfactuals-and-causal-inference" in fourth
-        assert (
-            steps[4]["edge"] == ["Size", "to_dv"] and "<b>Size</b> affects <b>Y var</b>" in steps[4]["html"]
+        assert steps[4]["edge"] == ["Size", "to_dv"]
+        assert steps[4]["html"] == (
+            "<b>Size</b> is listed as a possible confound because the tool found evidence that this construct "
+            "may affect both <b>X var</b> and <b>Y var</b>. To see the evidence, click the arrow from "
+            "<b>Size</b> to <b>Y var</b>."
         )
         assert html.count('class="tour-dot"') == 5 and 'id="tour-open"' in html
 
@@ -307,6 +311,20 @@ class TestTheWalkthrough:
 
     def test_one_confound_or_none_with_an_outcome_arrow_reads_right(self):
         one = self.steps(standalone_html(self.data("Age", example="")))
-        assert "1 possible confound, which is" in one[2]["html"] and "This construct is" in one[4]["html"]
+        assert "<b>1 possible confound</b>, which is listed" in one[2]["html"] and one[4]["edge"] == [
+            "Age",
+            "to_dv",
+        ]
         none = self.steps(standalone_html(self.data("NoY", example="")))
-        assert none[4]["edge"] is None and "For example" not in none[4]["html"]
+        assert none[4]["edge"] is None and none[4]["html"].endswith("To see the evidence, click an arrow.")
+
+    def test_the_example_is_matched_whatever_its_case_and_one_with_both_links_is_preferred(self):
+        steps = self.steps(standalone_html(self.data("Size", example="size")))
+        assert steps[4]["edge"] == ["Size", "to_dv"]  # the demo names it in lower case; the page capitalises
+
+    def test_confound_names_are_shown_with_a_capital_first_letter(self):
+        html = standalone_html(self.data("market competition", "IT intensity", "cEO style"))
+        evidence = blob(html)
+        assert "__meta__:Market competition" in evidence and "__meta__:IT intensity" in evidence
+        assert "__meta__:CEO style" in evidence and "market competition" not in "".join(evidence)
+        assert 'data-md="Market competition"' in html

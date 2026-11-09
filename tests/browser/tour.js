@@ -13,6 +13,13 @@ const { chromium } = require('playwright');
   const blurred = () => page.$$eval('[data-tour]:not(.tour-focus)', els => els.every(e => getComputedStyle(e).filter.includes('blur')));
   out.visibleAtStart = await page.isVisible('#tour-card');
   out.dots = await page.$$eval('.tour-dot', els => els.length);
+  // a touch mouse or trackpad scrolls by wheel events: with the tour open the page (and graph) stays put
+  await page.setViewportSize({ width: 1300, height: 360 });
+  await page.mouse.move(650, 200);
+  await page.mouse.wheel(0, 600);
+  await page.waitForTimeout(150);
+  out.scrolledDuringTour = await page.evaluate(() => window.scrollY);
+  await page.setViewportSize({ width: 1300, height: 820 });
   out.step1 = { dot: await dot(), focus: await focus(), blurred: await blurred(), back: await page.isDisabled('.tour-prev') };
   await page.click('.tour-next');
   out.step2 = { dot: await dot(), focus: await focus(), blurred: await blurred() };
@@ -33,6 +40,13 @@ const { chromium } = require('playwright');
     text: await page.innerText('.tour-text'),
   };
   await page.keyboard.press('Escape');
+  await page.setViewportSize({ width: 1300, height: 360 });
+  await page.mouse.move(650, 200);
+  await page.mouse.wheel(0, 600);
+  await page.waitForTimeout(150);
+  out.scrolledAfterTour = await page.evaluate(() => window.scrollY);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.setViewportSize({ width: 1300, height: 820 });
   out.closedByEscape = !(await page.isVisible('#tour-card')) && (await page.$$eval('body.tour-on', e => e.length)) === 0;
   await page.click('#tour-open');
   out.reopenedAtStep1 = (await page.isVisible('#tour-card')) && (await dot()) === 0;

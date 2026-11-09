@@ -316,22 +316,26 @@ def tour_steps(
     data: dict[str, Any], confounds: list[dict[str, Any]], example: str = ""
 ) -> list[dict[str, Any]]:
     """The walkthrough, built from this result: what each step says, the part of the page it shows, and on
-    the last step the arrow it points to (`example` affecting the outcome, or the first confound that has one)."""
+    the last step the arrow it points to (`example`'s arrow to the outcome, or else the first confound with
+    evidence on both of its links)."""
     iv, dv, n = html.escape(data["iv"]), html.escape(data["dv"]), len(confounds)
-    with_y = [c["name"] for c in confounds[:MAX_DRAWN] if yes(c["evidence_to_dv"])]
-    shown = example if example in with_y else (with_y[0] if with_y else "")
-    found = "1 possible confound, which is" if n == 1 else f"{n} possible confounds, which are"
-    these = (
-        "This construct is a possible confound" if n == 1 else f"These {n} constructs are possible confounds"
-    )
-    last = (
-        f"{these} because there is evidence that each may influence the independent variable, <b>{iv}</b>, and "
-        f"the dependent variable, <b>{dv}</b>. To see the evidence, click an arrow."
-    )
+    drawn = confounds[:MAX_DRAWN]
+    both = [c["name"] for c in drawn if yes(c["evidence_to_iv"]) and yes(c["evidence_to_dv"])]
+    with_y = [c["name"] for c in drawn if yes(c["evidence_to_dv"])]
+    wanted = display_name(example) if example else ""
+    shown = wanted if wanted in with_y else (both or with_y or [""])[0]
+    found = "<b>1 possible confound</b>, which is" if n == 1 else f"<b>{n} possible confounds</b>, which are"
     if shown:
-        last += (
-            f" For example, to see the evidence that <b>{html.escape(shown)}</b> affects <b>{dv}</b>, click the "
-            "highlighted arrow."
+        name = html.escape(shown)
+        last = (
+            f"<b>{name}</b> is listed as a possible confound because the tool found evidence that this construct "
+            f"may affect both <b>{iv}</b> and <b>{dv}</b>. To see the evidence, click the arrow from "
+            f"<b>{name}</b> to <b>{dv}</b>."
+        )
+    else:
+        last = (
+            "These constructs are listed as possible confounds because the tool found evidence that each may "
+            f"affect both <b>{iv}</b> and <b>{dv}</b>. To see the evidence, click an arrow."
         )
     return [
         {
@@ -344,12 +348,12 @@ def tour_steps(
             f"<b>{iv}</b> and <b>{dv}</b>.",
             "focus": "question",
         },
-        {"html": f"ConfoundSearch has found <b>{found}</b> listed on the left.", "focus": "confounds"},
+        {"html": f"ConfoundSearch has found {found} listed on the left.", "focus": "confounds"},
         {
             "html": "The tool shows possible confounds on a causal graph "
-            f"({cite(PEARL_URL, 'Pearl, 2020')}). The interface itself is a causal graph. It is an interactive "
-            "version of the diagrams found in many causal inference textbooks "
-            f"(e.g., {cite(MORGAN_WINSHIP_URL, 'Morgan and Winship, 2014')}).",
+            f"({cite(PEARL_URL, 'Pearl, 2020')}). The interface itself is an interactive version of the "
+            "diagrams found in many causal inference textbooks "
+            f"(e.g., {cite(MORGAN_WINSHIP_URL, 'Morgan & Winship, 2014')}).",
             "focus": "graph",
         },
         {"html": last, "focus": "graph", "edge": [shown, "to_dv"] if shown else None},
@@ -366,8 +370,25 @@ def tour_card(steps: int) -> str:
     )
 
 
+def display_name(name: str) -> str:
+    """A confound's name as the page shows it: first letter capitalised ("market competition" -> "Market
+    competition"), the rest as written, so "IT intensity" and "CEO style" stay as they are."""
+    return name[:1].upper() + name[1:]
+
+
+def with_display_names(data: dict[str, Any]) -> dict[str, Any]:
+    """`data` with every confound's name in its display form, everywhere the page reads a name."""
+    shown = dict(data)
+    shown["dag_confounders"] = [
+        {**c, "name": display_name(str(c["name"]))} for c in data.get("dag_confounders", [])
+    ]
+    shown["all_md_names"] = [display_name(str(n)) for n in data.get("all_md_names", [])]
+    return shown
+
+
 def standalone_page(data: dict[str, Any]) -> str:
     """The whole page for a `share_data` dict, as one HTML string with its data, style and script inside."""
+    data = with_display_names(data)
     by_name = {c["name"]: c for c in data.get("dag_confounders", [])}
     confounds = [by_name[n] for n in data.get("all_md_names", []) if n in by_name]
     blob = evidence_blob(data, confounds)
