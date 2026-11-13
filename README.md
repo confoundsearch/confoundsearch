@@ -17,7 +17,7 @@ pip install confoundsearch        # 1. install (Python 3.8+)
 confoundsearch demo               # 2. run a demo
 ```
 
-ConfoundSearch has latency and requires API keys. The demo gives you a sense of how it works before a full setup. Run `$ confoundsearch demo` to walk through a run from start to finish for the independent variable `organizational structure` and the dependent variable `firm performance`. The demo uses precomputed answers stored in the cache (see below) so that it runs in about a minute without any setup. We recommend trying out the demo to start and then proceeding with a full setup (i.e. `$ confoundsearch setup`).
+ConfoundSearch has latency and requires API keys. The demo gives you a sense of how it works before a full setup. Run `$ confoundsearch demo` to walk through a run from start to finish for the independent variable "organizational structure" and the dependent variable "firm performance". The demo uses precomputed answers stored in the cache (see below) so that it runs in about a minute without any setup. We recommend trying out the demo to start and then proceeding with a full setup (i.e. `$ confoundsearch setup`).
 
 ### Full setup
 
