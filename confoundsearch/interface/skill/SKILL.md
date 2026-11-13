@@ -54,7 +54,7 @@ confoundsearch run --json --model gpt-4.1 \
 ```
 
 Standard output is a single JSON document and nothing else; progress and errors go to standard error. Add
-`--confounds N` to look for more or fewer confounds (default 8), `--no-synthesis` to keep only papers that use the confound's own words, `--no-mechanisms` to skip the second round of searches, `--queries N` and `--synonyms N` to search more wordings of each pair (default 3 and 3; slower, more thorough), and `--max-budget USD` to stop once the language model has cost about
+`--confounds N` to ask the model for more or fewer confounds (default 8; 0 to not ask), `--mine N` to mine more or fewer from papers on the outcome (default 8; 0 to not mine; `--mine-queries N` and `--mine-depth N` set how many searches for the outcome and how many papers each, default 3 and 50), `--no-synthesis` to keep only papers that use the confound's own words, `--no-mechanisms` to skip the second round of searches, `--queries N` and `--synonyms N` to search more wordings of each pair (default 3 and 3; slower, more thorough), and `--max-budget USD` to stop once the language model has cost about
 that much (an estimate from the tokens used; a run usually costs under $1). The default plan has no randomness: the same answers
 from the model give the same run (a hosted model may still answer differently). Searches are saved in a data directory (the system's temporary folder, or `$CONFOUNDSEARCH_CACHE`), so a repeated search is
 answered from disk (one database per independent/dependent variable pair); `confoundsearch flush` empties that folder

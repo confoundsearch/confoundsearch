@@ -907,12 +907,25 @@ class TestThePolicy:
         assert any('{"confounds"' in prompt for prompt in asked) and any('{"synonyms"' in p for p in asked)
 
     def test_the_options_reach_the_policy_and_the_log(self, tmp_path, monkeypatch, env):
-        trail = self.run_default(tmp_path, monkeypatch, env, "--confounds", "1", "--synonyms", "0")
+        trail = self.run_default(
+            tmp_path, monkeypatch, env, "--confounds", "1", "--synonyms", "0", "--mine", "0"
+        )
         settings = trail.of_kind("run_started")[0].data["policy_settings"]
-        assert settings["max_confounds"] == 1 and settings["synonyms_per_term"] == 0
+        assert (
+            settings["max_confounds"] == 1
+            and settings["synonyms_per_term"] == 0
+            and settings["mine_count"] == 0
+        )
         assert settings["queries_per_side"] == 3 and settings["attach_per_side"] == cli.SYNTHESIS_ATTACH
         queries = [e.data["query"] for e in trail.of_kind("retrieved")]
         assert queries and all("firm size" in q for q in queries)  # only the one confound it was allowed
+
+    def test_by_default_it_also_mines_confounds_from_papers_on_the_outcome(self, tmp_path, monkeypatch, env):
+        trail = self.run_default(tmp_path, monkeypatch, env, "--confounds", "1", "--mine-queries", "1")
+        settings = trail.of_kind("run_started")[0].data["policy_settings"]
+        assert (settings["mine_count"], settings["mine_queries"], settings["mine_depth"]) == (8, 1, 50)
+        first = trail.of_kind("action")[0].data["action"]
+        assert first == {"type": "Retrieve", "query": "perf", "k": 50}  # the outcome itself, searched deep
 
     def test_the_default_run_reads_what_it_retrieved_by_meaning_and_no_synthesis_turns_that_off(
         self, tmp_path, monkeypatch, env

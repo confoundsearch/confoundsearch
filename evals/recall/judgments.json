@@ -1,0 +1,56 @@
+{
+ "claim|Firm age|ERP adoption and assimilation|Enterprise resource planning (ERP) software is a platform for innovation with high failure rates due to its complexity. In China, failure rates of ERP are also high, with key differences between China": {
+  "quote": "",
+  "supports": false
+ },
+ "claim|Firm size|Cloud computing capability|Purpose The purpose of this paper is to investigate the factors that affect the adoption of cloud computing by firms belonging to the high-tech industry. The eight factors examined in this study are r": {
+  "quote": "The findings revealed that relative advantage, top management support, firm size, competitive pressure, and trading partner pressure characteristics have a significant effect on the adoption of cloud computing.",
+  "supports": true
+ },
+ "claim|Firm size|ERP adoption and assimilation|Purpose The purpose of this paper is to develop a model that can be used to predict which small to medium\u2010sized enterprises (SMEs) are more likely to become adopters of enterprise systems (ERP, CRM, S": {
+  "quote": "Moreover, the results indicate that firms with a greater perceived relative advantage, a greater ability to experiment with these systems before adoption, greater top management support, greater organisational readiness and a larger size are predicted to become adopters of enterprise systems.",
+  "supports": true
+ },
+ "claim|Firm size|ERP adoption and assimilation|The key finding from this study is that companies of different sizes approach ERP implementations differently across a range of issues, and the benefits differ by company size.": {
+  "quote": "The key finding from this study is that companies of different sizes approach ERP implementations differently across a range of issues, and the benefits differ by company size.",
+  "supports": true
+ },
+ "claim|Firm size|Firm performance|Corporate growth is a natural consequence of management's wealth maximization efforts. However, its effects on profitability are not fully understood. This study examines the size-profitability relati": {
+  "quote": "The findings indicate that size is positively correlated with profitability.",
+  "supports": true
+ },
+ "claim|Firm size|Firm performance|Purpose -This study investigates whether size of 112 publicly listed firms in manufacturing sector affects their profitability in Turkey during the period 2005-2013.Methodology -Dynamic panel data app": {
+  "quote": "Findings-Estimation results suggest that after controlling for financial risk, liquidity level, growth opportunities, unsystematic risk, firm age, and the other factors, the indicators of firm size measured by firm's assets, sales and number of employees tend to have a positive influence on the profitability of firm measured by operating return on assets.",
+  "supports": true
+ },
+ "claim|Industry type|ERP adoption and assimilation|The role of industry in determining the diffusion and business value created by IT is analyzed and the slower the adoption of IT in an industry, the greater its impact on the firm's profitability.": {
+  "quote": "",
+  "supports": false
+ },
+ "claim|Industry type|Technology imitation and evaluation|The digital economy is a prevailing trend in global development, yet traditional firms still face challenges in digital transformation. Under institutional pressure, firms might imitate the digital st": {
+  "quote": "",
+  "supports": false
+ },
+ "claim|Ownership type|ERP adoption and assimilation|Purpose The purpose of this paper is to adopt two different perspectives of an organization\u2019s absorptive capacity, namely, the asset perspective and the capability perspective, to examine its impact o": {
+  "quote": "The results pointed to the existence of a negative relationship between prior IT knowledge and ERP assimilation particularly in the case of private organizations compared to state-owned organizations.",
+  "supports": true
+ },
+ "match|Firm age|{\"Absorptive capacity\": [\"absorptive capacity\", \"knowledge absorption capacity\", \"knowledge assimilation capacity\", \"organizational learning capability\"], \"Competitive pressure\": [\"competition pressure\", \"competitive intensity\", \"competitive pressure\", \"competitive rivalry\"], \"Environmental uncertainty\": [\"environmental dynamism\", \"environmental uncertainty\", \"environmental unpredictability\", \"environmental volatility\"], \"Firm size\": [\"company size\", \"enterprise size\", \"firm size\", \"organizational size\"], \"IT capability\": [\"digital capability\", \"information technology capability\", \"it capability\", \"it competence\"], \"Organizational culture\": [\"corporate culture\", \"institutional culture\", \"organizational climate\", \"organizational culture\"], \"Organizational readiness\": [\"implementation readiness\", \"organizational change readiness\", \"organizational preparedness\", \"organizational readiness\"], \"Top management support\": [\"executive support\", \"senior management support\", \"top management commitment\", \"top management support\"]}": {
+  "match": null
+ },
+ "match|Firm size|{\"Absorptive capacity\": [\"absorptive capacity\", \"knowledge absorption capacity\", \"knowledge assimilation capacity\", \"organizational learning capability\"], \"Competitive pressure\": [\"competition pressure\", \"competitive intensity\", \"competitive pressure\", \"competitive rivalry\"], \"Environmental uncertainty\": [\"environmental dynamism\", \"environmental uncertainty\", \"environmental unpredictability\", \"environmental volatility\"], \"Firm size\": [\"company size\", \"enterprise size\", \"firm size\", \"organizational size\"], \"IT capability\": [\"digital capability\", \"information technology capability\", \"it capability\", \"it competence\"], \"Organizational culture\": [\"corporate culture\", \"institutional culture\", \"organizational climate\", \"organizational culture\"], \"Organizational readiness\": [\"implementation readiness\", \"organizational change readiness\", \"organizational preparedness\", \"organizational readiness\"], \"Top management support\": [\"executive support\", \"senior management support\", \"top management commitment\", \"top management support\"]}": {
+  "match": "Firm size"
+ },
+ "match|Firm size|{\"Environmental dynamism\": [\"environmental dynamism\", \"environmental instability\", \"environmental turbulence\", \"environmental volatility\"], \"Financial resources\": [\"economic resources\", \"financial assets\", \"financial capital\", \"financial resources\"], \"Firm age\": [\"business age\", \"company age\", \"firm age\", \"organizational age\"], \"Firm size\": [\"company size\", \"enterprise size\", \"firm size\", \"organizational size\"], \"Human capital\": [\"educational attainment\", \"human capital\", \"skills and knowledge\", \"workforce competencies\"], \"Industry characteristics\": [\"industry attributes\", \"industry characteristics\", \"industry-level characteristics\", \"sectoral characteristics\"], \"Managerial capability\": [\"management capability\", \"managerial ability\", \"managerial capability\", \"managerial competence\"], \"Prior IT capability\": [\"baseline it capability\", \"pre-existing it capability\", \"prior it capability\", \"prior it competence\"]}": {
+  "match": "Firm size"
+ },
+ "match|Industry type|{\"Absorptive capacity\": [\"absorptive capacity\", \"knowledge absorption capacity\", \"knowledge assimilation capacity\", \"organizational learning capability\"], \"Competitive pressure\": [\"competition pressure\", \"competitive intensity\", \"competitive pressure\", \"competitive rivalry\"], \"Environmental uncertainty\": [\"environmental dynamism\", \"environmental uncertainty\", \"environmental unpredictability\", \"environmental volatility\"], \"Firm size\": [\"company size\", \"enterprise size\", \"firm size\", \"organizational size\"], \"IT capability\": [\"digital capability\", \"information technology capability\", \"it capability\", \"it competence\"], \"Organizational culture\": [\"corporate culture\", \"institutional culture\", \"organizational climate\", \"organizational culture\"], \"Organizational readiness\": [\"implementation readiness\", \"organizational change readiness\", \"organizational preparedness\", \"organizational readiness\"], \"Top management support\": [\"executive support\", \"senior management support\", \"top management commitment\", \"top management support\"]}": {
+  "match": null
+ },
+ "match|Ownership type|{\"Absorptive capacity\": [\"absorptive capacity\", \"knowledge absorption capacity\", \"knowledge assimilation capacity\", \"organizational learning capability\"], \"Competitive pressure\": [\"competition pressure\", \"competitive intensity\", \"competitive pressure\", \"competitive rivalry\"], \"Environmental uncertainty\": [\"environmental dynamism\", \"environmental uncertainty\", \"environmental unpredictability\", \"environmental volatility\"], \"Firm size\": [\"company size\", \"enterprise size\", \"firm size\", \"organizational size\"], \"IT capability\": [\"digital capability\", \"information technology capability\", \"it capability\", \"it competence\"], \"Organizational culture\": [\"corporate culture\", \"institutional culture\", \"organizational climate\", \"organizational culture\"], \"Organizational readiness\": [\"implementation readiness\", \"organizational change readiness\", \"organizational preparedness\", \"organizational readiness\"], \"Top management support\": [\"executive support\", \"senior management support\", \"top management commitment\", \"top management support\"]}": {
+  "match": null
+ },
+ "match|Time since ERP adoption|{\"Absorptive capacity\": [\"absorptive capacity\", \"knowledge absorption capacity\", \"knowledge assimilation capacity\", \"organizational learning capability\"], \"Competitive pressure\": [\"competition pressure\", \"competitive intensity\", \"competitive pressure\", \"competitive rivalry\"], \"Environmental uncertainty\": [\"environmental dynamism\", \"environmental uncertainty\", \"environmental unpredictability\", \"environmental volatility\"], \"Firm size\": [\"company size\", \"enterprise size\", \"firm size\", \"organizational size\"], \"IT capability\": [\"digital capability\", \"information technology capability\", \"it capability\", \"it competence\"], \"Organizational culture\": [\"corporate culture\", \"institutional culture\", \"organizational climate\", \"organizational culture\"], \"Organizational readiness\": [\"implementation readiness\", \"organizational change readiness\", \"organizational preparedness\", \"organizational readiness\"], \"Top management support\": [\"executive support\", \"senior management support\", \"top management commitment\", \"top management support\"]}": {
+  "match": null
+ }
+}

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import pytest
 
 from confoundsearch import (
@@ -148,6 +150,9 @@ class TestThePlan:
             "queries_per_side": 2,
             "results_per_query": 3,
             "attach_per_side": 5,
+            "mine_count": 8,
+            "mine_queries": 3,
+            "mine_depth": 50,
         }
 
 
@@ -371,3 +376,71 @@ class TestSecondPhase:
         )
         trajectory, _ = play(policy)
         assert len(self.queries(trajectory)) == 2
+
+
+class TestMining:
+    """Mining is its own source of confounds, beside asking: searched for Y, read by `mine`, own count."""
+
+    PAPERS: ClassVar[list[Passage]] = [
+        *PASSAGES,
+        Passage("y1", "Gender and age shape firm performance.", "Who performs"),
+        Passage("y2", "Firm performance and industry.", "Industry and performance"),
+    ]
+
+    def miner(self, *names, fail=False):
+        calls = []
+
+        def mine(x, y, papers):
+            calls.append((x, y, [p.id for p in papers]))
+            if fail:
+                raise RemoteError("down")
+            return list(names)
+
+        mine.calls = calls
+        return mine
+
+    def policy(self, mine, **options):
+        return DeterministicPolicy(
+            ask_for("firm size"),
+            synonyms_of({"firm performance": ["profitability", "firm results"]}),
+            mine=mine,
+            **options,
+        )
+
+    def test_it_searches_for_y_first_then_adds_the_mined_confounds_after_the_asked_ones(self):
+        mine = self.miner("Firm size", "industry", "gender", "IT investment", "age")
+        trajectory, _ = play(self.policy(mine, mine_count=2, mine_queries=2, mine_depth=7), self.PAPERS)
+        searches = [s.action for s in trajectory.steps if isinstance(s.action, Retrieve)]
+        assert [(r.query, r.k) for r in searches[:2]] == [(Y, 7), ("profitability", 7)]  # Y, then a synonym
+        assert mine.calls[0][:2] == (X, Y) and set(mine.calls[0][2]) <= {p.id for p in self.PAPERS}
+        added = [s.action.label for s in trajectory.steps if isinstance(s.action, AddConfound)]
+        assert added == ["firm size", "industry", "gender"]  # firm size was asked already: 2 new ones mined
+
+    def test_mining_can_be_the_only_source(self):
+        ask = ask_for("firm size")
+        trajectory, _ = play(
+            DeterministicPolicy(ask, synonyms_of({}), max_confounds=0, mine=self.miner("industry")),
+            self.PAPERS,
+        )
+        assert ask.calls == []  # asking is off
+        assert [s.action.label for s in trajectory.steps if isinstance(s.action, AddConfound)] == ["industry"]
+
+    @pytest.mark.parametrize("options", [{"mine_count": 0}, {}])
+    def test_with_a_count_of_zero_or_no_miner_it_does_not_mine(self, options):
+        mine = self.miner("industry") if options else None
+        trajectory, _ = play(self.policy(mine, **options), self.PAPERS)
+        assert mine is None or mine.calls == []
+        assert [s.action.label for s in trajectory.steps if isinstance(s.action, AddConfound)] == [
+            "firm size"
+        ]
+
+    def test_a_miner_that_cannot_be_reached_adds_nothing(self):
+        trajectory, _ = play(self.policy(self.miner("industry", fail=True)), self.PAPERS)
+        assert [s.action.label for s in trajectory.steps if isinstance(s.action, AddConfound)] == [
+            "firm size"
+        ]
+
+    def test_y_is_asked_for_synonyms_once_even_when_mining_used_them(self):
+        syn = synonyms_of({"firm performance": ["profitability"]})
+        play(DeterministicPolicy(ask_for("firm size"), syn, mine=self.miner()), self.PAPERS)
+        assert syn.calls.count(Y) == 1

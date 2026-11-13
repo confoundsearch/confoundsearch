@@ -12,6 +12,7 @@ from confoundsearch import (
     LLMError,
     LLMHighlights,
     LLMJudge,
+    LLMMine,
     LLMProposer,
     LLMSynthesis,
     Merge,
@@ -448,3 +449,49 @@ def test_each_kind_of_model_call_says_what_it_is_for():
     assert highlight.purposes == ["asking the model for the sentence that best shows size affects Y"]
     assert proposer.purposes == ["asking the model for the next moves"]
     assert current_purpose() == ""  # and nothing is left set afterwards
+
+
+class TestLLMMine:
+    """Mining: what papers on the outcome say affects it, ordered by how plausibly each also affects X."""
+
+    PAPERS: ClassVar[list[Passage]] = [
+        Passage("a", "Older users adopt less.", "Age"),
+        Passage("b", "Women and men differ.", "Gender"),
+    ]
+
+    def test_it_reads_the_papers_then_scores_the_candidates_against_x(self):
+        reading = "\n".join(
+            [
+                '{"id": "a", "constructs": ["Age", "income"]}',
+                '```json\n{"id": "b", "constructs": ["age", "Gender", "ERP adoption"]}',
+                "not json",
+                '["a list, not an object"]',
+                '{"id": "elsewhere", "constructs": ["invented"]}',  # not a paper it was given
+                '{"id": "a", "constructs": "not a list"}',
+                '{"id": "a", "constructs": [3, " "]}',
+            ]
+        )
+        # candidates in papers-named order: age (2 papers), gender, income
+        scoring = (
+            '{"i": 0, "score": 1}\n{"i": 1, "score": 3}\n{"i": 2, "score": "high"}\n{"i": 9, "score": 3}'
+        )
+        client = FakeClient(reading, scoring)
+        mined = LLMMine(client)("IT investment", "ERP adoption", self.PAPERS)
+        assert mined == ["gender", "age", "income"]  # by score, then by how many papers named it; Y left out
+        read, scored = (m[0]["content"] for m in client.seen)
+        assert '"ERP adoption"' in read and "id: a" in read and "abstract: Older users adopt less." in read
+        assert '"IT investment" (X)' in scored and "0. age\n1. gender\n2. income" in scored
+
+    def test_it_reads_and_scores_in_batches(self):
+        papers = [Passage(str(i), "text", "title") for i in range(3)]
+        reading = "\n".join(f'{{"id": "{i}", "constructs": ["c{i}"]}}' for i in range(3))
+        client = FakeClient(
+            reading, "", '{"i": 1, "score": 2}', '{"i": 0, "score": 3}'
+        )  # 2 readings, 2 scorings
+        mined = LLMMine(client, batch=2, score_batch=2)("x", "y", papers)
+        assert len(client.seen) == 4
+        assert mined == ["c2", "c1", "c0"]  # c2 scored 3 in the second scoring batch, c1 scored 2
+
+    def test_nothing_read_means_nothing_mined(self):
+        client = FakeClient("")
+        assert LLMMine(client)("x", "y", self.PAPERS) == []

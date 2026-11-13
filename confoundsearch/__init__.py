@@ -43,6 +43,7 @@ from confoundsearch.model.llm import (
     LLMConfounds,
     LLMHighlights,
     LLMJudge,
+    LLMMine,
     LLMProposer,
     LLMRewordings,
     LLMSynonyms,
@@ -51,7 +52,7 @@ from confoundsearch.model.llm import (
     Proposer,
 )
 
-__version__ = "0.9.5"
+__version__ = "0.9.8"
 
 __all__ = [
     "Action",
@@ -87,6 +88,7 @@ __all__ = [
     "LLMJudge",
     "LLMMeasures",
     "LLMMechanisms",
+    "LLMMine",
     "LLMProposer",
     "LLMRewordings",
     "LLMSynonyms",

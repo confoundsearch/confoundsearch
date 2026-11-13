@@ -3,8 +3,13 @@
 No randomness and no value estimates: a fixed plan over the MDP's actions, so the same answers from the model
 give the same run. In order:
 
-1. Ask the model which confounds to look for (`ask`), once.
-2. Get synonyms for each of them and for the two variables (`synonyms`), once per term.
+1. Find the confounds to look for, from two independent sources, each with its own count:
+   - ask: the model names the confounds of X and Y (`ask`, up to `max_confounds`; 0 skips it);
+   - mine: search for Y itself (its name and synonyms, `mine_queries` searches of `mine_depth` papers),
+     then the model reads those papers for what they say affects Y, best confounds first (`mine`, up to
+     `mine_count` more; 0 or no `mine` skips it). Its searches are ordinary moves, so what they find is
+     evidence like any other.
+2. Get synonyms for each confound and for the two variables (`synonyms`), once per term.
 3. For each confound, in order:
    - AddConfound, with its synonyms as the phrasings the graph treats as one idea;
    - for each variable: Retrieve the confound's phrasings paired with the variable's (`queries_per_side`
@@ -37,6 +42,8 @@ from confoundsearch.logic.graph import Passage, Target, normalize
 from confoundsearch.logic.state import State
 
 Ask = Callable[[str, str], Sequence[str]]  # (x, y) -> the confounds worth looking for
+Mine = Callable[[str, str, Sequence[Passage]], Sequence[str]]
+# (x, y, papers found for y) -> the confounds those papers suggest, most plausible first
 Synonyms = Callable[[str], Sequence[str]]  # term -> other ways to say it
 Synthesize = Callable[[str, str, Sequence[str], Sequence[Passage]], Sequence[Tuple[str, Target, str]]]
 # (x, y, confounds, passages) -> (confound, "X" or "Y", passage id) for each passage that supports a link
@@ -74,6 +81,10 @@ class DeterministicPolicy:
         mechanisms: Mechanisms | None = None,
         attributes: Attributes | None = None,
         attribute_measures: int = 4,
+        mine: Mine | None = None,
+        mine_count: int = 8,
+        mine_queries: int = 3,
+        mine_depth: int = 50,
     ) -> None:
         self.ask, self.synonyms, self.synthesize = ask, synonyms, synthesize
         self.measures, self.mechanisms = measures, mechanisms
@@ -81,6 +92,12 @@ class DeterministicPolicy:
         self.max_confounds, self.synonyms_per_term = max_confounds, synonyms_per_term
         self.queries_per_side, self.results_per_query = queries_per_side, results_per_query
         self.attach_per_side = attach_per_side
+        self.mine, self.mine_count, self.mine_queries, self.mine_depth = (
+            mine,
+            mine_count,
+            mine_queries,
+            mine_depth,
+        )
         self._script: Script | None = None
 
     def select(self, state: State, actions: Sequence[Action]) -> Action:
@@ -93,9 +110,20 @@ class DeterministicPolicy:
 
     def _plan(self, state: State) -> Script:
         x, y = state.graph.x, state.graph.y
+        phrasings: dict[str, list[str]] = {}
         names = distinct(self._asked(x, y), self.max_confounds)
+        if self.mine is not None and self.mine_count > 0:
+            phrasings[y] = self._phrasings(y)
+            for query in phrasings[y][: self.mine_queries]:
+                state = yield Retrieve(query, self.mine_depth)
+            found = sorted(state.observed, key=lambda p: p.id)  # only the mining searches so far
+            asked = {normalize(n) for n in names}
+            mined = [n for n in distinct(self._mined(x, y, found)) if normalize(n) not in asked]
+            names += mined[: self.mine_count]
         names = [n for n in names if normalize(n) not in {normalize(x), normalize(y)}]
-        phrasings = {term: self._phrasings(term) for term in distinct([x, y, *names])}
+        for term in distinct([x, y, *names]):
+            if term not in phrasings:
+                phrasings[term] = self._phrasings(term)
         taken: set[str] = set()
         added: list[tuple[str, list[str]]] = []
         sides: tuple[tuple[Target, str], tuple[Target, str]] = (("X", x), ("Y", y))
@@ -193,8 +221,17 @@ class DeterministicPolicy:
     # -- the parts -----------------------------------------------------------
 
     def _asked(self, x: str, y: str) -> Sequence[str]:
+        if self.max_confounds <= 0:
+            return []  # asking is switched off
         try:
             return self.ask(x, y)
+        except RemoteError:
+            return []
+
+    def _mined(self, x: str, y: str, papers: Sequence[Passage]) -> Sequence[str]:
+        assert self.mine is not None
+        try:
+            return self.mine(x, y, papers)
         except RemoteError:
             return []
 

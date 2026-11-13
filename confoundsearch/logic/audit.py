@@ -238,6 +238,9 @@ def record_start(log: AuditLog, x: str, y: str, max_steps: int, policy: object) 
             "queries_per_side",
             "results_per_query",
             "attach_per_side",
+            "mine_count",
+            "mine_queries",
+            "mine_depth",
         )
         if hasattr(policy, k)
     }

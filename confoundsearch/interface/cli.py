@@ -89,6 +89,7 @@ from confoundsearch.model.llm import (
     LLMConfounds,
     LLMHighlights,
     LLMJudge,
+    LLMMine,
     LLMProposer,
     LLMRewordings,
     LLMSynonyms,
@@ -339,7 +340,30 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=8,
         metavar="N",
-        help="deterministic policy: how many confounds to ask for",
+        help="deterministic policy: how many confounds to ask the model for (default 8; 0: do not ask)",
+    )
+    llm.add_argument(
+        "--mine",
+        type=int,
+        default=8,
+        metavar="N",
+        help="deterministic policy: how many more confounds to mine from papers on the outcome: search for "
+        "it, have the model read what the papers say affects it, and keep the N it judges most likely to "
+        "affect the cause too (default 8; 0: do not mine)",
+    )
+    llm.add_argument(
+        "--mine-queries",
+        type=int,
+        default=3,
+        metavar="N",
+        help="deterministic: searches for the outcome when mining, its name first, then synonyms (default 3)",
+    )
+    llm.add_argument(
+        "--mine-depth",
+        type=int,
+        default=50,
+        metavar="N",
+        help="deterministic: papers per mining search (default 50)",
     )
     llm.add_argument(
         "--no-synthesis",
@@ -727,6 +751,7 @@ def describe_run(args: argparse.Namespace) -> dict[str, Any]:
         "model_host": urlsplit(args.base_url or "").netloc or None,
         "policy": args.policy,
         "confounds": args.confounds,
+        "mine": args.mine,
         "synonyms": synonym_count(args),
         "queries": args.queries,
         "max_steps": args.max_steps,
@@ -777,6 +802,10 @@ def deterministic_policy(args: argparse.Namespace, client: ChatClient) -> Determ
         measures=None if args.no_synthesis or args.no_mechanisms else LLMMeasures(client),
         mechanisms=None if args.no_synthesis or args.no_mechanisms else LLMMechanisms(client),
         attributes=None if args.no_synthesis or args.no_mechanisms else LLMAttributes(client),
+        mine=LLMMine(client),
+        mine_count=args.mine,
+        mine_queries=args.mine_queries,
+        mine_depth=args.mine_depth,
     )
 
 
@@ -842,11 +871,15 @@ def demo(args: argparse.Namespace) -> int:
     model = demo_model(args)
     replay = model is None  # no key: replay the recorded run, which needs no model
     if replay:
-        print(
-            "No language model key found, so this replays the recorded example run (the model's answers\n"
-            "ship with the package). To run it live, add a key: `confoundsearch setup`.\n",
-            file=sys.stderr,
+        notes = (
+            "\u2022 You have not run setup yet.",
+            "\u2022 This demo uses cached output.",
+            "\u2022 To get set up: $ confoundsearch setup",
         )
+        rule = "\u2500" * max(len(note) for note in notes)  # a thin line as long as the longest bullet
+        print(
+            "\n".join([rule, *notes, rule]), file=sys.stderr
+        )  # the quotation below brings its own blank line
         model = RECORDED_MODEL
     argv = ["run", "--model", str(model), "--iv", DEMO_IV, "--dv", DEMO_DV]
     if not args.live:
@@ -857,6 +890,7 @@ def demo(args: argparse.Namespace) -> int:
     argv += ["--pace", str(DEMO_PACE)] if (replay or not args.live) and DEMO_PACE > 0 else []  # a cached run
     confounds = args.confounds or (4 if args.live else len(CURATED_CONFOUNDS))
     argv += ["--confounds", str(confounds), "--max-budget", str(args.max_budget), "--out", str(args.out)]
+    argv += ["--mine", "0"]  # the example's saved run asked for its confounds; it mined none
     for flag, value in (("--base-url", args.base_url), ("--api-key", args.api_key)):
         argv += [flag, value] if value else []
     argv += ["--openrouter"] if args.openrouter else []

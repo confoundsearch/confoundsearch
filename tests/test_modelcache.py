@@ -324,7 +324,7 @@ class TestTheDemoWithoutAKey:
         assert "--replay" in argv and argv[argv.index("--model") + 1] == RECORDED_MODEL
         assert argv[argv.index("--corpus") + 1] == "demo"  # the shipped example papers
         said = " ".join(capsys.readouterr().err.split())
-        assert "No language model key found" in said and "confoundsearch setup" in said
+        assert "You have not run setup yet" in said and "confoundsearch setup" in said
 
     def test_with_no_key_and_live_it_replays_on_the_sources_whose_searches_ship_saved(
         self, monkeypatch, tmp_path

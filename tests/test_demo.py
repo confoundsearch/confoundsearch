@@ -770,6 +770,8 @@ class TestTheShippedRecording:
             *[
                 "--confounds",
                 "4",
+                "--mine",
+                "0",  # the recording asked for its confounds and mined none
                 "--cache-dir",
                 str(tmp_path / "data"),
                 "--out",
@@ -796,7 +798,7 @@ class TestTheShippedRecording:
         assert cli.main(["demo", "--no-open", "--out", str(tmp_path / "d.html")]) == 0
         captured = capsys.readouterr()
         said = " ".join(captured.err.split())
-        assert "No language model key found" in said and "curated example" not in said
+        assert "You have not run setup yet" in said and "curated example" not in said
         assert "model calls were answered from saved replies, at no cost" in captured.out
         assert (tmp_path / "d.html").exists() and (tmp_path / "d.audit.jsonl").exists()
 

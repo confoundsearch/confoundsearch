@@ -323,6 +323,113 @@ class LLMConfounds:
             return _strings(self.client.chat([{"role": "user", "content": prompt}]), "confounds")
 
 
+MINE_BATCH = 30  # papers per reading call when mining
+MINE_SCORE_BATCH = 100  # candidates per scoring call when mining
+MINE_TEXT = 1200  # characters of each paper read when mining
+
+
+def _json_lines(reply: str) -> list[dict[str, Any]]:
+    """Each line of a reply that is a JSON object (fenced or not); other lines are skipped."""
+    items = []
+    for line in reply.splitlines():
+        try:
+            item = json.loads(_FENCE.sub("", line.strip()))
+        except ValueError:
+            continue
+        if isinstance(item, dict):
+            items.append(item)
+    return items
+
+
+class LLMMine:
+    """Mines confounds from papers on the outcome: what they say affects Y, best confounds of X and Y first.
+
+    Two readings. First the model lists, for each paper, every construct it says affects Y (controls and
+    respondent characteristics too); candidates are counted by how many papers name them. Then it scores
+    each candidate for how plausibly it also affects X, which is what makes it a confound and not just a
+    cause of Y. The order is by that score, then by how many papers named the candidate.
+    """
+
+    def __init__(
+        self, client: ChatClient, batch: int = MINE_BATCH, score_batch: int = MINE_SCORE_BATCH
+    ) -> None:
+        self.client = client
+        self.batch = batch
+        self.score_batch = score_batch
+
+    def __call__(self, x: str, y: str, papers: Sequence[Passage]) -> list[str]:
+        named = self._named(y, papers)
+        skip = {normalize(x), normalize(y)}
+        candidates = sorted((c for c in named if c not in skip), key=lambda c: (-len(named[c]), c))
+        scores = self._scores(x, y, candidates)
+        order = sorted(range(len(candidates)), key=lambda i: (-scores[i], i))
+        return [candidates[i] for i in order]
+
+    def _named(self, y: str, papers: Sequence[Passage]) -> dict[str, set[str]]:
+        """Construct (normalized) -> the ids of the papers that say it affects y."""
+        known = {paper.id for paper in papers}
+        named: dict[str, set[str]] = {}
+        for start in range(0, len(papers), self.batch):
+            batch = papers[start : start + self.batch]
+            with purpose(f"reading {len(batch)} papers on {y} for what affects it"):
+                reply = self.client.chat(self._reading(y, batch))
+            for item in _json_lines(reply):
+                constructs = item.get("constructs")
+                if item.get("id") not in known or not isinstance(constructs, list):
+                    continue
+                for construct in constructs:
+                    if isinstance(construct, str) and construct.strip():
+                        named.setdefault(normalize(construct), set()).add(str(item["id"]))
+        return named
+
+    def _scores(self, x: str, y: str, candidates: Sequence[str]) -> list[int]:
+        scores = [0] * len(candidates)
+        for start in range(0, len(candidates), self.score_batch):
+            batch = candidates[start : start + self.score_batch]
+            with purpose(f"asking the model which of {len(batch)} causes of {y} also affect {x}"):
+                reply = self.client.chat(self._scoring(x, y, batch))
+            for item in _json_lines(reply):
+                i, score = item.get("i"), item.get("score")
+                if isinstance(i, int) and 0 <= i < len(batch) and isinstance(score, int):
+                    scores[start + i] = score
+        return scores
+
+    @staticmethod
+    def _reading(y: str, papers: Sequence[Passage]) -> list[Message]:
+        lines = [
+            f'The outcome of interest is "{y}". Below are papers (an id, a title and an abstract).',
+            f'For each paper, list every construct that the paper reports, tests or argues affects "{y}"',
+            "(or a close form or measure of it): predictors, antecedents, determinants, moderators, and also",
+            "control variables or respondent characteristics (such as age, gender, tenure, firm size,",
+            "industry) when the text says they matter for the outcome. Each construct is a short noun phrase",
+            "of 1 to 4 words, as the literature names it. Skip papers that are not about this outcome.",
+            "",
+            "Reply with JSON lines only, one per paper that names any:",
+            '{"id": "<paper id>", "constructs": ["...", "..."]}',
+            "",
+        ]
+        for paper in papers:
+            lines += [f"id: {paper.id}", f"title: {paper.title}", f"abstract: {paper.text[:MINE_TEXT]}", ""]
+        return [{"role": "user", "content": "\n".join(lines)}]
+
+    @staticmethod
+    def _scoring(x: str, y: str, candidates: Sequence[str]) -> list[Message]:
+        listed = "\n".join(f"{i}. {c}" for i, c in enumerate(candidates))
+        prompt = (
+            f'A study asks whether "{x}" (X) affects "{y}" (Y). '
+            "A confound is a construct that affects both X and Y. "
+            "Papers report that each construct below affects Y. "
+            "Score each one for how plausibly it also affects X, and so confounds the study:\n"
+            "3 = very plausible: a standard control or a well-known cause of X\n"
+            "2 = plausible\n"
+            "1 = possible but a stretch\n"
+            "0 = not plausible, or it is a form of X or Y itself, or an outcome of X\n\n"
+            f"{listed}\n\n"
+            'Reply with JSON lines only, one per construct: {"i": <number>, "score": <0-3>}'
+        )
+        return [{"role": "user", "content": prompt}]
+
+
 class LLMSynonyms:
     """Other ways the research literature names the same thing."""
 

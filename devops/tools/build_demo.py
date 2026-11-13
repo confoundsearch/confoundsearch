@@ -284,7 +284,7 @@ def record_demo(work: Path, passes: int = 5, curated: bool = False) -> bool:
     def run(name: str, *extra: str) -> tuple[int, Path]:
         log = work / f"{name}.log.jsonl"
         argv = ["run", *corpus, "--model", RECORDED_MODEL, "--iv", iv, "--dv", dv]
-        argv += [*(CURATED_SEARCH if curated else ()), "--confounds", str(confounds)]
+        argv += [*(CURATED_SEARCH if curated else ()), "--confounds", str(confounds), "--mine", "0"]
         argv += ["--cache-dir", str(work), "--max-budget", "5", *extra]
         return cli.main([*argv, "--out", str(work / f"{name}.html"), "--log", str(log)]), log
 
@@ -434,7 +434,8 @@ def main(argv: list[str] | None = None) -> int:
                 [
                     *["run", "--corpus", "semanticscholar,openalex", "--model", model],
                     *["--iv", iv, "--dv", dv, "--cache-dir", str(work), "--max-budget", "5"],
-                    *["--confounds", str(confounds), "--out", str(work / f"run-{number}.html")],
+                    *["--confounds", str(confounds), "--mine", "0"],
+                    *["--out", str(work / f"run-{number}.html")],
                 ]
             )
         wait_for_writes()

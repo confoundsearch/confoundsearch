@@ -19,3 +19,6 @@ keyword_neighbors.md
 # what a run writes into the folder you ran it from (confoundsearch demo, the README's results/ folder)
 confoundsearch-demo.*
 results/
+
+# evals/trace_recall.py: the runs it traces (paper abstracts, full prompts, caches); the trace itself is tracked
+evals/recall/runs/
